@@ -2,7 +2,7 @@
 #define AAC_ENCODER_HPP
 
 #include "IMPAudio.hpp"
-#include <faac.h>
+#include <fdk-aac/aacenc_lib.h>
 
 class AACEncoder : public IMPAudioEncoder
 {
@@ -17,8 +17,7 @@ public:
     int close() override;
 
 private:
-    unsigned long inputSamples;
-    faacEncHandle handle = nullptr;
+    HANDLE_AACENCODER handle;
     int sampleRate;
     int numChn;
 };

@@ -19,34 +19,23 @@ AACEncoder::~AACEncoder()
 
 int AACEncoder::open()
 {
-    unsigned long outputBufferSize;
-    handle = faacEncOpen(sampleRate, numChn, &inputSamples, &outputBufferSize);
-    if (!handle)
+    if (aacEncOpen(&handle, 0, numChn) != AACENC_OK)
     {
-        LOG_ERROR("Failed to open FAAC encoder");
+        LOG_ERROR("Failed to open AAC encoder.");
         return -1;
     }
 
-    faacEncConfigurationPtr config = faacEncGetCurrentConfiguration(handle);
-    config->aacObjectType = LOW;
-    config->bandWidth = sampleRate;
-    config->bitRate = cfg->audio.input_bitrate * 1000;
-    config->inputFormat = FAAC_INPUT_16BIT;
-    config->mpegVersion = MPEG4;
-    config->outputFormat = RAW_STREAM; // no need for ADTS headers
-
-    // Disable to reduce CPU utilization
-    config->allowMidside = 0;
-    config->useTns = 0;
-
-    if (!faacEncSetConfiguration(handle, config))
+    if (aacEncoder_SetParam(handle, AACENC_AOT, AOT_AAC_LC) != AACENC_OK ||
+        aacEncoder_SetParam(handle, AACENC_SAMPLERATE, sampleRate) != AACENC_OK ||
+        aacEncoder_SetParam(handle, AACENC_CHANNELMODE, numChn == 1 ? MODE_1 : MODE_2) != AACENC_OK ||
+        aacEncoder_SetParam(handle, AACENC_BITRATE, cfg->audio.input_bitrate) != AACENC_OK ||
+        aacEncoder_SetParam(handle, AACENC_TRANSMUX, TT_MP4_RAW) != AACENC_OK)
     {
-        LOG_ERROR("Failed to configure FAAC encoder");
+        LOG_ERROR("Failed to set AAC encoder parameters.");
         return -1;
     }
 
-    LOG_INFO("faac expects " << inputSamples << " samples per frame");
-
+    LOG_INFO("AAC Encoder initialized with bitrate: " << cfg->audio.input_bitrate);
     return 0;
 }
 
@@ -54,7 +43,7 @@ int AACEncoder::close()
 {
     if (handle)
     {
-        faacEncClose(handle);
+        aacEncClose(&handle);
     }
     handle = nullptr;
     return 0;
@@ -62,38 +51,36 @@ int AACEncoder::close()
 
 int AACEncoder::encode(IMPAudioFrame *data, unsigned char *outbuf, int *outLen)
 {
-    if (!handle)
+    AACENC_BufDesc inBufDesc = {0}, outBufDesc = {0};
+    AACENC_InArgs inArgs = {0};
+    AACENC_OutArgs outArgs = {0};
+    int inBufferIdentifiers[] = {IN_AUDIO_DATA};
+    int inBufferElementSize[] = {sizeof(int16_t)};
+    void *inBuffer[] = {data->virAddr};
+    int outBufferIdentifiers[] = {OUT_BITSTREAM_DATA};
+    int outBufferElementSize[] = {1};
+    void *outBuffer[] = {outbuf};
+
+    inBufDesc.numBufs = 1;
+    inBufDesc.bufs = inBuffer;
+    inBufDesc.bufferIdentifiers = inBufferIdentifiers;
+    inBufDesc.bufSizes = &data->len;
+    inBufDesc.bufElSizes = inBufferElementSize;
+
+    outBufDesc.numBufs = 1;
+    outBufDesc.bufs = outBuffer;
+    outBufDesc.bufferIdentifiers = outBufferIdentifiers;
+    outBufDesc.bufSizes = outLen;
+    outBufDesc.bufElSizes = outBufferElementSize;
+
+    inArgs.numInSamples = data->len / sizeof(int16_t);
+
+    if (aacEncEncode(handle, &inBufDesc, &outBufDesc, &inArgs, &outArgs) != AACENC_OK)
     {
-        LOG_ERROR("FAAC encoder not available");
+        LOG_WARN("Encoding failed.");
         return -1;
     }
 
-    const int frameSamples = data->len / sizeof(int16_t);
-    const int frameLen = faacEncEncode(
-        handle,
-        reinterpret_cast<int32_t*>(data->virAddr),
-        frameSamples,
-        reinterpret_cast<unsigned char*>(outbuf),
-        1024);
-    if (frameLen < 0)
-    {
-        LOG_WARN("Encoding failed with error code: " << frameLen);
-        return -1;
-    }
-
-    *outLen = frameLen;
-
-    if (frameSamples < inputSamples)
-    {
-        // Adjust the timestamp of the sequence because faac outputs 1024
-        // samples per frame and we only can provide 960 per frame (at 16 kHz).
-        const int64_t frameDurationIn = static_cast<int64_t>(frameSamples * 1000) / sampleRate;
-        const int64_t frameDurationOut = static_cast<int16_t>(inputSamples * 1000) / sampleRate;
-        const int64_t driftMs = frameDurationOut - frameDurationIn;
-        const int64_t frameNum = data->seq + 3; // faac buffers the first 3 frames
-        const int64_t timestampAdjustment = driftMs * frameNum;
-        data->timeStamp += timestampAdjustment;
-    }
-
+    *outLen = outArgs.numOutBytes;
     return 0;
 }
