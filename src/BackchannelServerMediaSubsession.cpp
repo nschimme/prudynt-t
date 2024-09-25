@@ -1,74 +1,43 @@
 #include "BackchannelAudioServerMediaSubsession.hpp"
+#include "IADSink.hpp"
 
-BackchannelAudioServerMediaSubsession* BackchannelAudioServerMediaSubsession::createNew(UsageEnvironment& env, const char* sdpDescription)
+BackchannelAudioServerMediaSubsession* BackchannelAudioServerMediaSubsession::createNew(UsageEnvironment& env)
 {
-    // Parse the SDP to determine the audio format
-    if (strstr(sdpDescription, "L16")) {
-        audioFormat = IMPAudioFormat::PCM;
-    } else if (strstr(sdpDescription, "MP4A-LATM")) {
-        audioFormat = IMPAudioFormat::AAC;
-    } else {
-        audioFormat = IMPAudioFormat::Unknown;
-    }
-    return new BackchannelAudioServerMediaSubsession(env, audioFormat);
+    return new BackchannelAudioServerMediaSubsession(env);
 }
 
-BackchannelAudioServerMediaSubsession::BackchannelAudioServerMediaSubsession(UsageEnvironment& env, IMPAudioFormat audioFormat)
-    : OnDemandServerMediaSubsession(env, true), audioFormat(audioFormat)
-{
-}
+BackchannelAudioServerMediaSubsession::BackchannelAudioServerMediaSubsession(UsageEnvironment& env)
+    : OnDemandServerMediaSubsession(env, true)
+{}
 
 BackchannelAudioServerMediaSubsession::~BackchannelAudioServerMediaSubsession()
+{}
+
+MediaSink* BackchannelAudioServerMediaSubsession::createNewStreamDestination(unsigned clientSessionId, unsigned& estBitrate)
 {
-    std::lock_guard<std::mutex> lock(clientMapMutex);
-    for (auto& pair : clientRTPSources) {
-        Medium::close(pair.second);
-    }
-    clientRTPSources.clear();
+    return IADSink::createNew(envir());
+}
+
+RTPSource* BackchannelAudioServerMediaSubsession::createNewRTPSource(Groupsock* rtpGroupsock,
+                                                                     unsigned char rtpPayloadTypeIfDynamic,
+                                                                     MediaSink* outputSink)
+{
+    // TODO: Negotiate per client
+    const char* mimeTypeString = "audio/PCMU";
+    const char* rtpPayloadFormatName = 0;
+    unsigned rtpTimestampFrequency = 8000;
+
+    return SimpleRTPSource::createNew(envir(), rtpGroupsock,
+        rtpPayloadFormatName, rtpTimestampFrequency,
+        mimeTypeString);
 }
 
 FramedSource* BackchannelAudioServerMediaSubsession::createNewStreamSource(unsigned clientSessionId, unsigned& estBitrate)
 {
-    std::lock_guard<std::mutex> lock(clientMapMutex);
-    FramedSource* source = nullptr;
-
-    switch (global_audio[audioChn]->imp_audio->format) {
-    case IMPAudioFormat::PCM:
-        source = PCMBackchannelSource::createNew(envir());
-        break;
-    case IMPAudioFormat::AAC:
-        source = AACBackchannelSource::createNew(envir());
-        break;
-    // Add more cases if additional audio formats are supported
-    default:
-        break;
-    }
-
-    if (source) {
-        clientBackchannelSources[clientSessionId] = source;
-        estBitrate = global_audio[audioChn]->imp_audio->bitrate;
-    }
-
-    return source;    
+    return nullptr;
 }
 
-RTPSink* BackchannelAudioServerMediaSubsession::createNewRTPSink(Groupsock* rtpGroupsock, unsigned char rtpPayloadTypeIfDynamic, FramedSource* inputSource) {
-    const char* rtpPayloadFormatName;
-    unsigned rtpTimestampFrequency;
-
-    switch (audioFormat)
-    {
-    case IMPAudioFormat::PCM:
-        rtpPayloadFormatName = "L16";
-        rtpTimestampFrequency = 16000;
-        break;
-    case IMPAudioFormat::AAC:
-        rtpPayloadFormatName = "MP4A-LATM";
-        rtpTimestampFrequency = 16000;
-        break;
-    default:
-        return nullptr; // Unsupported format
-    }
-    
-    return SimpleRTPSink::createNew(envir(), rtpGroupsock, rtpPayloadTypeIfDynamic, rtpTimestampFrequency, "audio", rtpPayloadFormatName, 1);
+RTPSink* BackchannelAudioServerMediaSubsession::createNewRTPSink(Groupsock* rtpGroupsock, unsigned char rtpPayloadTypeIfDynamic, FramedSource* inputSource)
+{
+    return nullptr;
 }

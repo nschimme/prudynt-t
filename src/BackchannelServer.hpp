@@ -3,9 +3,12 @@
 
 #include <liveMedia/RTSPServer.hh>
 
-class BackchannelServer : public RTSPServer {
+class BackchannelServer : public RTSPServer
+{
 public:
-    static BackchannelServer* createNew(UsageEnvironment& env, Port port);
+    static BackchannelServer* createNew(UsageEnvironment& env, Port ourPort = 554,
+                                        UserAuthenticationDatabase* authDatabase = NULL,
+                                        unsigned reclamationTestSeconds = 10);
 
 protected:
     BackchannelServer(UsageEnvironment& env, Port port);

@@ -77,6 +77,12 @@ void RTSP::addSubsession(int chnNr, _stream &stream)
         sms->addSubsession(audioSub);
         LOG_INFO("Audio stream " << chnNr << " added to session");
     }
+
+    if (cfg->audio.output_enabled) {
+        BackchannelServerMediaSubsession *backSub = BackchannelServerMediaSubsession::createNew(*env, 0);
+        sms->addSubsession(backSub);
+        LOG_INFO("Backchannel stream " << chnNr << " added to session");
+    }
 #endif
 
     rtspServer->addServerMediaSession(sms);
@@ -96,11 +102,11 @@ void RTSP::start()
         auth->addUserRecord(
             cfg->rtsp.username,
             cfg->rtsp.password);
-        rtspServer = RTSPServer::createNew(*env, cfg->rtsp.port, auth, 10);
+        rtspServer = BackChannelServer::createNew(*env, cfg->rtsp.port, auth);
     }
     else
     {
-        rtspServer = RTSPServer::createNew(*env, cfg->rtsp.port, nullptr, 10);
+        rtspServer = BackChannelServer::createNew(*env, cfg->rtsp.port, nullptr);
     }
     if (rtspServer == NULL)
     {
