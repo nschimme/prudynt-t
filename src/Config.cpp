@@ -97,6 +97,7 @@ std::vector<ConfigItem<bool>> CFG::getBoolItems()
         {"image.hflip", image.hflip, false, validateBool},
         {"motion.enabled", motion.enabled, false, validateBool},
         {"rtsp.auth_required", rtsp.auth_required, true, validateBool},
+        {"rtsp.backchannel", rtsp.backchannel, true, validateBool},
 #if defined(AUDIO_SUPPORT)
         {"stream0.audio_enabled", stream0.audio_enabled, true, validateBool},
 #endif

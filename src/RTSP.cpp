@@ -1,4 +1,6 @@
 #include "RTSP.hpp"
+#include "CustomRTSPServer.hpp" // Added for custom server
+#include "BackchannelServerMediaSubsession.hpp" // Added for backchannel subsession
 
 #define MODULE "RTSP"
 
@@ -79,6 +81,15 @@ void RTSP::addSubsession(int chnNr, _stream &stream)
     }
 #endif
 
+    // Add the backchannel audio subsession (receive only) conditionally
+    if (cfg->rtsp.backchannel) {
+        BackchannelServerMediaSubsession* backchannelSub = BackchannelServerMediaSubsession::createNew(*env);
+        sms->addSubsession(backchannelSub);
+        LOG_INFO("Backchannel audio subsession added to session for stream " << chnNr);
+    } else {
+        LOG_INFO("Backchannel audio disabled by configuration for stream " << chnNr);
+    }
+
     rtspServer->addServerMediaSession(sms);
 
     char *url = rtspServer->rtspURL(sms);
@@ -96,11 +107,13 @@ void RTSP::start()
         auth->addUserRecord(
             cfg->rtsp.username,
             cfg->rtsp.password);
-        rtspServer = RTSPServer::createNew(*env, cfg->rtsp.port, auth, cfg->rtsp.session_reclaim);
+        // Use CustomRTSPServer
+        rtspServer = CustomRTSPServer::createNew(*env, cfg->rtsp.port, auth, cfg->rtsp.session_reclaim);
     }
     else
     {
-        rtspServer = RTSPServer::createNew(*env, cfg->rtsp.port, nullptr, cfg->rtsp.session_reclaim);
+        // Use CustomRTSPServer
+        rtspServer = CustomRTSPServer::createNew(*env, cfg->rtsp.port, nullptr, cfg->rtsp.session_reclaim);
     }
     if (rtspServer == NULL)
     {

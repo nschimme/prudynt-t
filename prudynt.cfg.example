@@ -28,6 +28,7 @@ rtsp: {
 	# auth_required: true;  # Enable RTSP authentication (true/false).
 	# username: "thingino";  # Username for RTSP authentication.
 	# password: "thingino";  # Password for RTSP authentication.
+	# backchannel: true;  # Enable backchannel audio (true/false).
 };
 
 # Sensor Settings

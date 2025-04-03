@@ -108,6 +108,7 @@ struct _rtsp {
     const char *username;
     const char *password;
     const char *name;
+    bool backchannel;
 };
 struct _sensor {
     int fps;
