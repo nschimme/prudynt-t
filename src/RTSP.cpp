@@ -1,6 +1,5 @@
-#include "RTSP.hpp"
+#include "RTSP.hpp" // Includes IMPBackchannel.hpp
 #include "BackchannelServerMediaSubsession.hpp"
-#include "BackchannelSink.hpp"
 
 #define MODULE "RTSP"
 
@@ -81,9 +80,15 @@ void RTSP::addSubsession(int chnNr, _stream &stream)
     }
 #endif
 
+    // Add backchannel subsession if enabled (Check config directly)
     if (cfg->rtsp.backchannel) {
-        BackchannelServerMediaSubsession* backchannelSub = BackchannelServerMediaSubsession::createNew(*env, fBackchannelSink);
-        sms->addSubsession(backchannelSub);
+        BackchannelServerMediaSubsession* backchannelSub = IMPBackchannel::createNewSubsession(*env);
+        if (backchannelSub) {
+            sms->addSubsession(backchannelSub);
+            LOG_INFO("Backchannel subsession added.");
+        } else {
+            LOG_ERROR("Failed to create backchannel subsession via IMPBackchannel factory.");
+        }
     }
 
     rtspServer->addServerMediaSession(sms);
@@ -97,19 +102,7 @@ void RTSP::start()
     scheduler = BasicTaskScheduler::createNew();
     env = BasicUsageEnvironment::createNew(*scheduler);
 
-    // Create the BackchannelSink early if enabled
-    if (cfg->rtsp.backchannel) {
-        fBackchannelSink = BackchannelSink::createNew(*env);
-        if (fBackchannelSink == nullptr) {
-             LOG_ERROR("Failed to create BackchannelSink!");
-             // Handle error appropriately - maybe return or throw
-             // For now, let it proceed but log the error.
-        } else {
-             LOG_DEBUG("BackchannelSink created successfully.");
-        }
-    } else {
-        fBackchannelSink = nullptr; // Ensure it's null if not enabled
-    }
+    // ADEC init/deinit is now handled in main.cpp
     
     if (cfg->rtsp.auth_required)
     {
@@ -183,13 +176,7 @@ void RTSP::start()
     // Cleanup RTSP server and environment
     Medium::close(rtspServer); // Close RTSP server first
 
-    // Close the backchannel sink *before* reclaiming the environment
-    if (fBackchannelSink != nullptr)
-    {
-        LOG_DEBUG("Closing BackchannelSink.");
-        Medium::close(fBackchannelSink);
-        fBackchannelSink = nullptr;
-    }
+    // ADEC deinit is now handled in main.cpp
 
     env->reclaim(); // Reclaim environment *after* closing sink
     delete scheduler;

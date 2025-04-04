@@ -8,10 +8,12 @@
 #include "RTPSource.hh" // Needed for RTPSource type definition
 
 // Project Headers
-#include "BackchannelSink.hpp" // Include the actual sink definition
+// #include "BackchannelSourceSelector.hpp" // Removed
+#include "BackchannelSink.hpp" // Include the renamed sink
 
 class BackchannelServerMediaSubsession : public OnDemandServerMediaSubsession {
 public:
+    // Constructor now takes the sink (which is a FramedSource)
     static BackchannelServerMediaSubsession* createNew(UsageEnvironment& env, BackchannelSink *sink);
 
     // Destructor should be virtual if inheriting
@@ -45,7 +47,7 @@ protected: // Called only by createNew()
 
 private:
     char* fSDPLines = nullptr; // Buffer to hold generated SDP lines, initialize to nullptr
-    BackchannelSink* fMySink = nullptr; // Pointer to our custom sink instance
+    BackchannelSink* fMySink = nullptr; // Pointer to our sink instance (renamed from fMySelector)
 };
 
 #endif // BACKCHANNEL_SERVER_MEDIA_SUBSESSION_HPP

@@ -1,167 +1,103 @@
-// Project Headers
-#include "BackchannelSink.hpp"
-#include "Logger.hpp"
+#include "BackchannelSink.hpp" // Updated include
+#include <GroupsockHelper.hh> // For closeSocket
+#include <vector> // For std::vector
 
-// Live555 Headers
-#include "Media.hh" // For Medium::close
+#define MODULE "BackchannelSink" // Updated module name
 
-// Standard C/C++ Headers
-#include <stdio.h>    // For popen, pclose, fwrite, ferror, feof
-#include <errno.h>    // For errno
-#include <string.h>   // For strerror
-#include <sys/wait.h> // For WEXITSTATUS, WIFEXITED, WIFSIGNALED, WTERMSIG
-#include <algorithm>  // Potentially needed for list operations if changed later
-
-#define MODULE "BackchannelSink"
-
-BackchannelSink* BackchannelSink::createNew(UsageEnvironment& env) {
-    return new BackchannelSink(env);
+BackchannelSink* BackchannelSink::createNew(UsageEnvironment& env, backchannel_stream* stream_data) { // Updated signature
+    return new BackchannelSink(env, stream_data);
 }
 
-BackchannelSink::BackchannelSink(UsageEnvironment& env)
-    : MediaSink(env),
-      fControllingSource(nullptr), // Initialize controlling source
-      fPipe(nullptr), // Initialize pipe pointer
-      fIsPlaying(false) // Initialize playing state
+BackchannelSink::BackchannelSink(UsageEnvironment& env, backchannel_stream* stream_data) // Updated signature
+    : FramedSource(env), // Still inherits FramedSource
+      fControllingSource(nullptr),
+      fStream(stream_data), // Store the stream pointer
+      fInputQueue(nullptr), // Initialize convenience pointer
+      fIsCurrentlyGettingFrames(false) // Initialize flag
 {
-    fReceiveBuffer = new u_int8_t[kReceiveBufferSize];
-    if (fReceiveBuffer == nullptr) {
-        LOG_ERROR("Failed to allocate receive buffer");
-        // Handle error appropriately, maybe throw?
+    if (fStream == nullptr) {
+         LOG_ERROR("backchannel_stream provided to BackchannelSink is null!");
+         // Handle error
+    } else {
+        fInputQueue = fStream->inputQueue.get(); // Get queue pointer from stream struct
+        if (fInputQueue == nullptr) {
+             LOG_ERROR("Input queue within backchannel_stream is null!");
+             // Handle error
+        }
     }
-    // Note: Pipe is started lazily in continuePlaying()
+    fClientReceiveBuffer = new u_int8_t[kClientReceiveBufferSize];
+    if (fClientReceiveBuffer == nullptr) {
+        LOG_ERROR("Failed to allocate client receive buffer");
+        // Consider throwing an exception or handling error more robustly
+    }
 }
 
 BackchannelSink::~BackchannelSink() {
-    // Clean up contexts
-    for (auto const& [source, context] : fSourceContexts) {
-        delete context;
+    // envir().taskScheduler().unscheduleDelayedTask(fNextTask); // Removed
+
+    // Clean up contexts and stop sources
+    while (!fClientSources.empty()) {
+        FramedSource* source = fClientSources.front();
+        // Call removeSource to handle cleanup logic consistently
+        removeSource(source);
     }
+    // Ensure map is clear (should be by removeSource calls)
     fSourceContexts.clear();
-    fClientSources.clear(); // Clear the list too
 
-    delete[] fReceiveBuffer;
-    closePipe(); // Ensure pipe is closed on destruction
+    delete[] fClientReceiveBuffer;
+    // fInputQueue is managed externally
 }
 
-void BackchannelSink::stopPlaying() {
-    LOG_INFO("Stopping playback.");
-    fIsPlaying = false; // Set playing state to false
-    // Stop getting frames from the current controlling source
-    if (fControllingSource && fSource == fControllingSource) {
-         fControllingSource->stopGettingFrames(); // Use base class fSource mechanism
-    }
-    fControllingSource = nullptr; // Clear the controller
-    fSource = nullptr; // Clear base class source pointer
-    MediaSink::stopPlaying(); // Call base class stop
-    closePipe(); // Close the pipe when stopping
-}
-
-bool BackchannelSink::startPipe() {
-    if (fPipe != NULL) {
-        return true; // Already open
-    }
-
-    LOG_INFO("Starting pipe to /bin/iac -s");
-    fPipe = popen("/bin/iac -s", "w"); // Open pipe for writing
-    if (fPipe == NULL) {
-        LOG_ERROR("popen() failed: " << strerror(errno));
-        return false;
-    }
-    LOG_INFO("Pipe to /bin/iac -s started successfully.");
-    return true;
-}
-
-void BackchannelSink::closePipe() {
-    if (fPipe != NULL) {
-        LOG_INFO("Closing pipe to /bin/iac -s");
-        int ret = pclose(fPipe);
-        fPipe = NULL; // Set to NULL regardless of pclose result
-        if (ret == -1) {
-            LOG_ERROR("pclose() failed: " << strerror(errno));
-        } else {
-             // Check if the process exited normally
-             if (WIFEXITED(ret)) {
-                 LOG_INFO("Pipe closed. Process exited with status: " << WEXITSTATUS(ret));
-             } else if (WIFSIGNALED(ret)) {
-                 LOG_WARN("Pipe closed. Process terminated by signal: " << WTERMSIG(ret));
-             } else {
-                 LOG_WARN("Pipe closed. Process stopped for unknown reason.");
-             }
-        }
-    }
-}
-
-bool BackchannelSink::writeToPipe(u_int8_t* data, unsigned size) {
-    if (fPipe == NULL) {
-         LOG_ERROR("Attempted to write to a closed or uninitialized pipe.");
-         return false;
-    }
-
-    size_t bytesWritten = fwrite(data, 1, size, fPipe);
-    if (bytesWritten < size) {
-        // Check error status *before* logging strerror, as logging might change errno
-        int stream_error = ferror(fPipe);
-        int stream_eof = feof(fPipe);
-        int saved_errno = errno; // Save errno immediately
-
-        if (stream_eof) {
-             LOG_ERROR("fwrite failed: End of file on pipe (process likely terminated). Closing pipe.");
-        } else if (stream_error) {
-             // Use saved_errno if ferror is set, otherwise strerror might report success
-             LOG_ERROR("fwrite failed: " << strerror(saved_errno) << ". Closing pipe.");
-        } else {
-             LOG_ERROR("fwrite failed: Wrote partial data (" << bytesWritten << " of " << size << " bytes). Unknown error. Closing pipe.");
-        }
-        // Close the pipe on any write error
-        closePipe();
-        return false;
-    }
-    // Optional: fflush(fPipe); // Uncomment if immediate flushing is needed, might impact performance
-
-    return true;
-}
-
-
-void BackchannelSink::addSource(FramedSource* newSource) {
+void BackchannelSink::addSource(FramedSource* newSource) { // Renamed class
     if (newSource == nullptr) return;
 
-    LOG_INFO("Adding source");
+    LOG_INFO("Adding client source");
 
-    // Stop previous controlling source from getting frames if it exists
-    // Note: This assumes stopGettingFrames() is safe to call multiple times
-    // or if no getNextFrame is pending. Live555 might handle this.
-    if (fControllingSource != nullptr && fSource == fControllingSource) {
-         LOG_DEBUG("Stopping previous controlling source");
-         fControllingSource->stopGettingFrames();
+    // Stop previous controlling source if it exists and we are getting frames
+    if (fControllingSource != nullptr && fIsCurrentlyGettingFrames) { // Use new flag
+        LOG_DEBUG("Stopping previous controlling source");
+        fControllingSource->stopGettingFrames();
     }
 
-    // Add to the list (maintains order for fallback)
+    // Add to the list
     fClientSources.push_back(newSource);
 
-    // Create and store context
-    BackchannelClientData* context = new BackchannelClientData{this, newSource};
+    // Create and store context (update 'this' type)
+    ClientSourceContext* context = new ClientSourceContext{this, newSource};
     fSourceContexts[newSource] = context;
 
-    // New source takes control
+    // New source takes control. This sink intentionally only processes data
+    // from one client source at a time (the "controlling source"). When a new
+    // client connects, it becomes the controlling source, effectively implementing
+    // a "last talker wins" strategy.
     fControllingSource = newSource;
-    fSource = newSource; // Update base class pointer
+    LOG_INFO("New controlling source set");
 
-    LOG_INFO("New controlling source");
+    // Increment active session count using fStream (atomically)
+    if (fStream) { // Check if fStream is valid
+        // Use fetch_add for atomic increment. Memory order relaxed is sufficient
+        // as we only need atomicity, not specific ordering guarantees here.
+        int previous_count = fStream->active_sessions.fetch_add(1, std::memory_order_relaxed);
+        LOG_INFO("Backchannel session added. Active sessions: " << previous_count + 1);
+        // If this is the first session, the processor thread will notice and open the pipe.
+    } else {
+        LOG_ERROR("fStream is null in addSource! Cannot increment session count.");
+    }
 
-    // If we are already playing, start getting frames from the new controller
-    if (fIsPlaying) { // Use our state variable
-        LOG_INFO("Sink is playing, requesting frames from new controlling source.");
-        fControllingSource->getNextFrame(fReceiveBuffer, kReceiveBufferSize,
-                                         afterGettingFrame, context,
-                                         onSourceClosure, this);
+
+    // If we should be getting frames, start getting from the new controller
+    if (fIsCurrentlyGettingFrames) { // Use new flag
+        LOG_INFO("Sink is active, requesting frames from new controlling source.");
+        fControllingSource->getNextFrame(fClientReceiveBuffer, kClientReceiveBufferSize,
+                                         incomingDataHandler, context,
+                                         sourceClosureHandler, context); // Pass context for closure too
     }
 }
 
-void BackchannelSink::removeSource(FramedSource* sourceToRemove) {
+void BackchannelSink::removeSource(FramedSource* sourceToRemove) { // Renamed class
     if (sourceToRemove == nullptr) return;
 
-    LOG_INFO("Removing source");
+    LOG_INFO("Removing client source");
 
     // Find and remove from the list
     fClientSources.remove(sourceToRemove);
@@ -169,179 +105,192 @@ void BackchannelSink::removeSource(FramedSource* sourceToRemove) {
     // Find and delete the context
     auto it = fSourceContexts.find(sourceToRemove);
     if (it != fSourceContexts.end()) {
-        delete it->second;
+        // Stop getting frames *before* deleting context, just in case
+        sourceToRemove->stopGettingFrames();
+
+        // Decrement active session count BEFORE deleting context using fStream (atomically)
+        if (fStream) { // Check if fStream is valid
+            // Use fetch_sub for atomic decrement. Memory order relaxed is sufficient.
+            int previous_count = fStream->active_sessions.fetch_sub(1, std::memory_order_relaxed);
+            // Note: previous_count holds the value *before* the decrement.
+            LOG_INFO("Backchannel session removed. Active sessions: " << previous_count - 1);
+            // If this was the last session (i.e., previous_count was 1),
+            // the processor thread will notice and close the pipe.
+        } else {
+             LOG_ERROR("fStream is null in removeSource! Cannot decrement session count.");
+        }
+
+        delete it->second; // Now delete context
         fSourceContexts.erase(it);
     } else {
         LOG_WARN("Attempted to remove source not in context map");
+        // Decrement count even if context wasn't found? Maybe not, indicates inconsistency.
+        // Still try to stop it if it might be active
+        sourceToRemove->stopGettingFrames();
     }
 
     // If the removed source was the controller, fall back
     if (sourceToRemove == fControllingSource) {
         LOG_INFO("Removed source was the controller.");
-        // Stop getting frames from the removed source
-        if (fSource == sourceToRemove) {
-             sourceToRemove->stopGettingFrames();
-        }
+    fControllingSource = nullptr; // Clear controller first
 
-        if (!fClientSources.empty()) {
-            fControllingSource = fClientSources.back(); // Fallback to the last one in the list
-            fSource = fControllingSource; // Update base class pointer
-            LOG_INFO("Falling back to controlling source");
+    if (!fClientSources.empty()) {
+        fControllingSource = fClientSources.back(); // Fallback to the last one added
+        LOG_INFO("Falling back to controlling source");
 
-            // If playing, start getting frames from the new controller
-            if (this->fIsPlaying) { // Use our state variable
-                 auto fallbackIt = fSourceContexts.find(fControllingSource);
-                 if (fallbackIt != fSourceContexts.end()) {
-                     LOG_INFO("Sink is playing, requesting frames from new fallback controlling source.");
-                     fControllingSource->getNextFrame(fReceiveBuffer, kReceiveBufferSize,
-                                                      afterGettingFrame, fallbackIt->second,
-                                                      onSourceClosure, this);
+        // If getting frames, start getting from the new controller
+        if (fIsCurrentlyGettingFrames) { // Use new flag
+             auto fallbackIt = fSourceContexts.find(fControllingSource);
+             if (fallbackIt != fSourceContexts.end()) {
+                 LOG_INFO("Sink is active, requesting frames from new fallback controlling source."); // Updated log
+                 fControllingSource->getNextFrame(fClientReceiveBuffer, kClientReceiveBufferSize,
+                                                  incomingDataHandler, fallbackIt->second,
+                                                  sourceClosureHandler, fallbackIt->second);
                  } else {
-                     LOG_ERROR("Fallback source has no context!");
+                     LOG_ERROR("Fallback source has no context! Cannot request frames.");
                      fControllingSource = nullptr; // Cannot proceed
-                     fSource = nullptr;
                  }
             }
         } else {
-            LOG_INFO("No sources left after removal.");
+            LOG_INFO("No client sources left after removal.");
             fControllingSource = nullptr;
-            fSource = nullptr;
         }
+    }
+    // Note: We don't need to explicitly stop non-controlling sources here
+    // because handleIncomingData ignores their frames anyway.
+}
+
+// Static callback wrapper for incoming frames from clients
+void BackchannelSink::incomingDataHandler(void* clientData, unsigned frameSize, // Renamed class
+                                                  unsigned numTruncatedBytes,
+                                                  struct timeval presentationTime, // Keep time/duration args for now, might be useful later
+                                                  unsigned durationInMicroseconds) {
+    ClientSourceContext* context = static_cast<ClientSourceContext*>(clientData);
+    if (context && context->sink) { // Use sink
+        // Pass only frameSize and numTruncatedBytes as time/duration aren't used immediately
+        context->sink->handleIncomingData(context, frameSize, numTruncatedBytes);
     } else {
-         // If removing a non-controlling source, just ensure it stops getting frames
-         // (though it shouldn't have been getting them anyway based on afterGettingFrame logic)
-         LOG_DEBUG("Removed source was not the controller.");
-         sourceToRemove->stopGettingFrames(); // Belt-and-suspenders
+         LOG_ERROR("Invalid context in incomingDataHandler");
     }
 }
 
-
-// Static wrapper
-void BackchannelSink::afterGettingFrame(void* clientData, unsigned frameSize,
-                                      unsigned numTruncatedBytes,
-                                      struct timeval presentationTime,
-                                      unsigned durationInMicroseconds) {
-    BackchannelClientData* context = static_cast<BackchannelClientData*>(clientData);
-    if (context && context->sink) {
-        context->sink->afterGettingFrame(context, frameSize, numTruncatedBytes, presentationTime, durationInMicroseconds);
-    }
-    // else {
-        // Log error or handle appropriately if context is invalid
-        // This might happen if the sink is destroyed while a frame callback is pending
-    // }
-}
-
-// Per-instance handler using the context
-void BackchannelSink::afterGettingFrame(BackchannelClientData* context, unsigned frameSize, unsigned numTruncatedBytes,
-                                      struct timeval /*presentationTime*/, unsigned /*durationInMicroseconds*/) {
-
+// Per-instance handler for incoming frames from clients
+void BackchannelSink::handleIncomingData(ClientSourceContext* context, unsigned frameSize, unsigned numTruncatedBytes) { // Renamed class, simplified args
     FramedSource* currentSource = context->source;
 
     // --- Critical Section: Check if this source is the controller ---
-    // No mutex needed here as fControllingSource is only written in add/removeSource,
-    // which likely happen in the main thread context, not concurrently with this callback.
-    // If add/remove can happen in different threads, a mutex would be needed around fControllingSource reads/writes.
     if (currentSource != fControllingSource) {
-        // Ignore frame from non-controlling source
+        // LOG_DEBUG("Ignoring frame from non-controlling source: " << currentSource);
         // Do NOT request the next frame for this non-controlling source
+        // However, we MUST re-request from the *controlling* source if it exists and we are playing,
+        // otherwise the pipeline might stall if the controller stops sending.
+        // This seems complex. Simpler: Only the controller requests next frames.
         return;
     }
     // --- End Critical Section ---
 
     // If we get here, currentSource == fControllingSource
 
-    if (fPipe == nullptr) {
-        LOG_ERROR("Pipe not open in afterGettingFrame for controlling source. Stopping.");
-        // Don't request next frame
-        return;
-    }
-
     if (numTruncatedBytes > 0) {
         LOG_WARN("Controlling source sent truncated frame (" << frameSize << " bytes, " << numTruncatedBytes << " truncated). Discarding.");
-        // Continue playing - request next frame below
-    } else if (frameSize < 12) { // Basic RTP header check
-        LOG_WARN("Controlling source sent frame too small for RTP (" << frameSize << " bytes). Discarding.");
+        // Continue getting next frame below
+    } else if (frameSize == 0) {
+         LOG_DEBUG("Controlling source sent zero-sized frame. Ignoring.");
+         // Continue getting next frame below
     } else {
-        // Extract payload type from RTP header
-        unsigned char rtpPayloadType = fReceiveBuffer[1] & 0x7F;
-        const unsigned char expectedPayloadFormat = 8; // Hardcoded payload format for PCMA/ALAW
-
-        if (rtpPayloadType != expectedPayloadFormat) {
-            LOG_WARN("Controlling source sent frame with unexpected payload type: " << (int)rtpPayloadType
-                     << " (expected: " << (int)expectedPayloadFormat << "). Discarding.");
-        } else {
-            // Assuming fixed 12-byte RTP header
-            // TODO: Handle RTP header extensions and CSRC list if present (RFC 3550)
-            unsigned headerSize = 12; // Basic header size
-            // unsigned char cc = fReceiveBuffer[0] & 0x0F; // CSRC count
-            // headerSize += cc * 4;
-            // bool hasExtension = (fReceiveBuffer[0] & 0x10);
-            // if (hasExtension && frameSize >= headerSize + 4) {
-            //     unsigned extensionLen = (fReceiveBuffer[headerSize+2] << 8) | fReceiveBuffer[headerSize+3];
-            //     headerSize += 4 + extensionLen * 4;
-            // }
-
-
-            if (frameSize <= headerSize) {
-                 LOG_WARN("Controlling source sent frame with no payload (size " << frameSize << ", header " << headerSize << "). Discarding.");
-            } else {
-                u_int8_t* payload = fReceiveBuffer + headerSize;
-                unsigned payloadSize = frameSize - headerSize;
-
-                // Write the raw payload data to the pipe
-                if (!writeToPipe(payload, payloadSize)) {
-                    // Error logged in writeToPipe. Pipe is likely closed now.
-                    LOG_ERROR("Write to pipe failed for controlling source. Stopping playback.");
-                    // Don't request next frame if pipe failed
-                    return;
-                }
+        // Valid frame received from the controlling source
+        // Push it onto the input queue for the worker thread
+        if (fInputQueue) {
+            // Create a vector and copy the data
+            std::vector<uint8_t> rtpPacket(fClientReceiveBuffer, fClientReceiveBuffer + frameSize);
+            // LOG_DEBUG("Pushing RTP packet (size: " << frameSize << ") to backchannel queue.");
+            // Use write() instead of try_write(). It returns false if an old element was dropped.
+            if (!fInputQueue->write(std::move(rtpPacket))) {
+                 // Log if an element was dropped due to buffer being full
+                 LOG_WARN("Backchannel input queue was full. Oldest packet dropped.");
             }
+        } else {
+             LOG_ERROR("Input queue is null, cannot queue packet!");
         }
     }
 
-    // Request the next frame *only* from the controlling source
-    if (fPipe != nullptr && fControllingSource == currentSource) {
-        fControllingSource->getNextFrame(fReceiveBuffer, kReceiveBufferSize,
-                                         afterGettingFrame, context, // Pass the same context back
-                                         onSourceClosure, this);
-    } else if (fPipe == nullptr) {
-         LOG_INFO("Pipe closed, not requesting further frames");
-    } else {
-         // This case (fControllingSource != currentSource) should have been caught at the top
-         LOG_ERROR("Logic error: Reached end of afterGettingFrame for non-controlling source?");
+    // Request the next frame *only* from the controlling source if we should still be getting frames
+    if (fIsCurrentlyGettingFrames && fControllingSource == currentSource) { // Use new flag
+        fControllingSource->getNextFrame(fClientReceiveBuffer, kClientReceiveBufferSize,
+                                         incomingDataHandler, context,
+                                         sourceClosureHandler, context);
     }
 }
 
-
-Boolean BackchannelSink::continuePlaying() {
-    fIsPlaying = true; // Set playing state to true
-    // Ensure the pipe is started before requesting the first frame
-    if (!startPipe()) {
-        LOG_ERROR("Failed to start pipe. Cannot continue playing.");
-        return false; // Cannot proceed without the pipe
-    }
-
-    if (fControllingSource == nullptr) {
-        LOG_WARN("No controlling source set, cannot continue playing yet.");
-        // We might get added sources later, so return true, but don't request frames yet.
-        // Or return false? Let's return true, assuming a source will be added.
-        return true;
-    }
-
-    // Find the context for the controlling source
-    auto it = fSourceContexts.find(fControllingSource);
-    if (it == fSourceContexts.end()) {
-         LOG_ERROR("Controlling source has no context! Cannot continue playing.");
-         return false;
-    }
-    BackchannelClientData* context = it->second;
-
-    // Request the first frame from the controlling source
-    LOG_INFO("Requesting first frame from controlling source");
-    fControllingSource->getNextFrame(fReceiveBuffer, kReceiveBufferSize,
-                                     afterGettingFrame, context,
-                                     onSourceClosure, this);
-
-    // We rely on the base class fSource being set correctly in addSource/removeSource
-    return true; // Indicate success
+// Static callback for client source closure
+void BackchannelSink::sourceClosureHandler(void* clientData) { // Renamed class
+     ClientSourceContext* context = static_cast<ClientSourceContext*>(clientData);
+     if (context && context->sink && context->source) { // Use sink
+         LOG_INFO("Source closure detected");
+         // Use scheduler to avoid issues if called during source destruction
+         context->sink->envir().taskScheduler().scheduleDelayedTask(0, // Use sink
+             (TaskFunc*)[](void* cd) {
+                 ClientSourceContext* ctx = static_cast<ClientSourceContext*>(cd);
+                 // Check if sink still exists before calling member function
+                 if (ctx && ctx->sink) { // Use sink
+                    ctx->sink->handleSourceClosure(ctx->source); // Use sink
+                 }
+             },
+             context);
+     } else {
+         LOG_ERROR("Invalid context in sourceClosureHandler");
+     }
 }
+
+// Per-instance handler for source closure
+void BackchannelSink::handleSourceClosure(FramedSource* source) { // Renamed class
+     LOG_DEBUG("Handling source closure");
+     // Remove the source, which will handle fallback logic etc.
+     removeSource(source);
+     // Note: The context associated with this source is deleted within removeSource
+}
+
+
+// --- Methods related to downstream delivery are removed or become NO-OPs ---
+
+// This FramedSource doesn't actually deliver frames downstream in the Live555 pipeline.
+// Its purpose is to receive frames from clients and push them to the worker queue.
+// The base class might still call this, so provide a minimal implementation.
+void BackchannelSink::doGetNextFrame() { // Renamed class
+    // LOG_DEBUG("BackchannelSink::doGetNextFrame called (NO-OP)");
+    // We don't deliver frames this way.
+    // However, this might be interpreted by the framework as "start playing".
+    // Let's use this to trigger requests from the *client* sources.
+    if (!fIsCurrentlyGettingFrames) {
+         fIsCurrentlyGettingFrames = true;
+         // If there's a controlling source, start requesting frames from it.
+         if (fControllingSource != nullptr) {
+             auto it = fSourceContexts.find(fControllingSource);
+             if (it != fSourceContexts.end()) {
+                 LOG_INFO("doGetNextFrame: Starting frame requests from controller");
+                 fControllingSource->getNextFrame(fClientReceiveBuffer, kClientReceiveBufferSize,
+                                                  incomingDataHandler, it->second,
+                                                  sourceClosureHandler, it->second);
+             } else {
+                  LOG_ERROR("Controlling source has no context in doGetNextFrame!");
+             }
+         } else {
+              LOG_WARN("doGetNextFrame called, but no controlling source available yet.");
+         }
+    }
+}
+
+// Called when the downstream component (the subsession using this source) stops.
+void BackchannelSink::doStopGettingFrames() { // Renamed class
+    LOG_INFO("BackchannelSink::doStopGettingFrames called");
+    fIsCurrentlyGettingFrames = false;
+
+    // Stop asking the current controlling source for frames
+    if (fControllingSource != nullptr) {
+        LOG_DEBUG("Stopping frame requests from controller");
+        fControllingSource->stopGettingFrames();
+    }
+    // We don't need to stop non-controlling sources as they aren't being polled.
+}
+
+// --- deliverFrame method removed ---

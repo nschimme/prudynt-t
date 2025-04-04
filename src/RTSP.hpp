@@ -8,7 +8,14 @@
 #include "IMPDeviceSource.hpp"
 #include "IMPEncoder.hpp"
 #include "Logger.hpp"
-#include "BackchannelSink.hpp"
+#include "IMPBackchannel.hpp" // Still needed for static methods
+
+// Forward declarations no longer needed here
+// class BackchannelSourceSelector;
+// class BackchannelPayloadExtractor;
+// class BackchannelAudioTranscoder;
+// class BackchannelPipeSink;
+
 
 class RTSP
 {
@@ -24,7 +31,8 @@ private:
     RTSPServer *rtspServer{};
     int audioChn = 0;
     IMPDeviceSource<AudioFrame, audio_stream> *audioSource{};
-    BackchannelSink* fBackchannelSink{};
+
+    // IMPBackchannel* backChannel{}; // Removed
 };
 
 #endif

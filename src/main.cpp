@@ -11,6 +11,7 @@
 #include "globals.hpp"
 #include "IMPSystem.hpp"
 #include "Motion.hpp"
+#include "IMPBackchannel.hpp" // Needed for static init/deinit
 using namespace std::chrono;
 
 std::mutex mutex_main;
@@ -33,6 +34,7 @@ std::shared_ptr<video_stream> global_video[NUM_VIDEO_CHANNELS] = {nullptr};
 #if defined(AUDIO_SUPPORT)
 std::shared_ptr<audio_stream> global_audio[NUM_AUDIO_CHANNELS] = {nullptr};
 #endif
+std::shared_ptr<backchannel_stream> global_backchannel = nullptr;
 
 std::shared_ptr<CFG> cfg = std::make_shared<CFG>();
 
@@ -76,6 +78,7 @@ int main(int argc, const char *argv[])
     pthread_t osd_thread;
     pthread_t rtsp_thread;
     pthread_t motion_thread;
+    pthread_t backchannel_thread; // Added thread handle for backchannel
 
     if (Logger::init(cfg->general.loglevel))
     {
@@ -103,12 +106,24 @@ int main(int argc, const char *argv[])
 #if defined(AUDIO_SUPPORT)
     global_audio[0] = std::make_shared<audio_stream>(1, 0, 0);
 #endif
+    // Initialize global backchannel stream pointer
+    if (cfg->rtsp.backchannel) {
+        global_backchannel = std::make_shared<backchannel_stream>();
+    }
 
     pthread_create(&cf_thread, nullptr, Worker::watch_config_poll, nullptr);
     pthread_create(&ws_thread, nullptr, WS::run, &ws);
 
     while (true)
     {
+        // Initialize global ADEC resources if backchannel is enabled
+        if (cfg->rtsp.backchannel && (global_restart_rtsp || startup)) { // Tie to RTSP restart? Or separate? Let's tie to RTSP for now.
+             if (IMPBackchannel::init() != 0) {
+                 LOG_ERROR("Failed to initialize IMPBackchannel ADEC resources! Backchannel may not function.");
+                 // Decide if this is fatal or just disables backchannel
+             }
+        }
+
         global_restart = true;
 #if defined(AUDIO_SUPPORT)
         if (cfg->audio.input_enabled && (global_restart_audio || startup))
@@ -161,7 +176,16 @@ int main(int argc, const char *argv[])
             LOG_DEBUG_OR_ERROR(ret, "create rtsp thread");
         }
 
-        /* we should wait a short period to ensure all services are up 
+        // Start backchannel processor thread if enabled
+        if (cfg->rtsp.backchannel && global_backchannel && (global_restart_rtsp || startup)) { // Tie to RTSP restart?
+             int ret = pthread_create(&backchannel_thread, nullptr, Worker::backchannel_processor, global_backchannel.get());
+             LOG_DEBUG_OR_ERROR(ret, "create backchannel processor thread");
+             // wait for initialization done (pipe opened)
+             global_backchannel->has_started.acquire();
+        }
+
+
+        /* we should wait a short period to ensure all services are up
          * and running, additionally we add the timespan which is configured as 
          * OSD startup delay.
          */
@@ -201,6 +225,18 @@ int main(int argc, const char *argv[])
             int ret = pthread_join(global_audio[0]->thread, NULL);
             LOG_DEBUG_OR_ERROR(ret, "join audio thread");
         }
+
+        // Stop backchannel processor thread if RTSP is restarting
+        if (global_backchannel && global_backchannel->running && global_restart_rtsp) {
+             LOG_INFO("Stopping backchannel processor thread...");
+             global_backchannel->running = false;
+             // Notify queue to wake up thread if it's waiting? Depends on MsgChannel impl.
+             // Assuming wait_read_for timeout handles this for now.
+             int ret = pthread_join(backchannel_thread, NULL);
+             LOG_DEBUG_OR_ERROR(ret, "join backchannel processor thread");
+             // Note: Pipe is closed within the thread function's cleanup
+        }
+
 
         if (global_restart_video)
         {
@@ -247,7 +283,14 @@ int main(int argc, const char *argv[])
                 LOG_DEBUG_OR_ERROR(ret, "join stream0 thread");
             }
         }
+    } // end while(true)
+
+    // Final cleanup before exit (though loop likely never exits)
+    LOG_INFO("Performing final cleanup...");
+    if (cfg->rtsp.backchannel) {
+         IMPBackchannel::deinit();
     }
+    // ... other potential cleanup ...
 
     return 0;
 }

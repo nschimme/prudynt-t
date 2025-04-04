@@ -4,6 +4,8 @@
 #include <memory>
 #include <functional>
 #include <atomic>
+#include <vector>      // Added for std::vector
+#include <semaphore>   // Added for std::binary_semaphore
 #include "liveMedia.hh"
 
 #include "MsgChannel.hpp"
@@ -12,6 +14,7 @@
 #include "IMPFramesource.hpp"
 
 #define MSG_CHANNEL_SIZE 20
+#define BACKCHANNEL_QUEUE_SIZE 30 // Define queue size for backchannel
 #define NUM_AUDIO_CHANNELS 1
 #define NUM_VIDEO_CHANNELS 2
 
@@ -116,10 +119,27 @@ struct video_stream
     video_stream(int encChn, _stream *stream, const char *name)
         : encChn(encChn), stream(stream), name(name), running(false), idr(false), idr_fix(0), imp_encoder(nullptr), imp_framesource(nullptr),
           msgChannel(std::make_shared<MsgChannel<H264NALUnit>>(MSG_CHANNEL_SIZE)), onDataCallback(nullptr),  run_for_jpeg{false},
-          hasDataCallback{false} {}
-};
+           hasDataCallback{false} {}
+ };
 
-extern std::condition_variable global_cv_worker_restart;
+ // Structure for Backchannel Processing State
+ struct backchannel_stream
+ {
+     // Using vector<uint8_t> to represent raw RTP packet data
+     // Using vector<uint8_t> to represent raw RTP packet data
+     std::shared_ptr<MsgChannel<std::vector<uint8_t>>> inputQueue;
+     pthread_t thread;
+     std::atomic<bool> running; // Controls thread lifetime
+     std::atomic<int> active_sessions{0}; // Counter for active client sessions
+     std::binary_semaphore has_started{0}; // For startup synchronization
+
+     backchannel_stream()
+         : inputQueue(std::make_shared<MsgChannel<std::vector<uint8_t>>>(BACKCHANNEL_QUEUE_SIZE)),
+           running(false) {}
+ };
+
+
+ extern std::condition_variable global_cv_worker_restart;
 
 extern bool global_restart;
 extern bool global_restart_rtsp;
@@ -131,8 +151,9 @@ extern bool global_main_thread_signal;
 extern bool global_motion_thread_signal;
 extern std::atomic<char> global_rtsp_thread_signal;
 
-extern std::shared_ptr<jpeg_stream> global_jpeg[NUM_VIDEO_CHANNELS];
-extern std::shared_ptr<audio_stream> global_audio[NUM_AUDIO_CHANNELS];
-extern std::shared_ptr<video_stream> global_video[NUM_VIDEO_CHANNELS];
+ extern std::shared_ptr<jpeg_stream> global_jpeg[NUM_VIDEO_CHANNELS];
+ extern std::shared_ptr<audio_stream> global_audio[NUM_AUDIO_CHANNELS];
+ extern std::shared_ptr<video_stream> global_video[NUM_VIDEO_CHANNELS];
+ extern std::shared_ptr<backchannel_stream> global_backchannel; // Added global instance
 
-#endif // GLOBALS_HPP
+ #endif // GLOBALS_HPP

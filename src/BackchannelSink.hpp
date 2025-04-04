@@ -1,71 +1,75 @@
-#ifndef BACKCHANNEL_SINK_HPP
-#define BACKCHANNEL_SINK_HPP
+#ifndef BACKCHANNEL_SINK_FRAMED_SOURCE_HPP // Changed guard name
+#define BACKCHANNEL_SINK_FRAMED_SOURCE_HPP
 
-// Standard C/C++ Headers
-#include <cstdio> // For FILE* (popen)
-#include <unistd.h> // For popen/pclose
-#include <errno.h> // For error checking
+#include <liveMedia.hh>
+#include <BasicUsageEnvironment.hh>
 #include <list>
 #include <map>
+#include <vector> // Needed for MsgChannel template
+#include <cstdint> // Needed for uint8_t
 
-// Live555 Headers
-#include "MediaSink.hh"
-#include "Boolean.hh"
-#include "FramedSource.hh"
-
-// Project Headers
 #include "Logger.hpp"
+#include "MsgChannel.hpp" // Include MsgChannel definition
+#include "globals.hpp"    // Include globals to get backchannel_stream definition
 
-class BackchannelSink : public MediaSink {
-    // Helper struct to pass both sink and source to the callback
-    struct BackchannelClientData {
-        BackchannelSink* sink;
-        FramedSource* source;
-    };
-
+// Renamed class, still inherits FramedSource as it acts as the source for the subsession
+class BackchannelSink : public FramedSource {
 public:
-    static BackchannelSink* createNew(UsageEnvironment& env);
+    // Constructor now takes the backchannel_stream pointer
+    static BackchannelSink* createNew(UsageEnvironment& env, backchannel_stream* stream_data);
 
+    // Methods to manage client sources
     virtual void addSource(FramedSource* source);
     virtual void removeSource(FramedSource* source);
 
 protected:
-    BackchannelSink(UsageEnvironment& env);
+    BackchannelSink(UsageEnvironment& env, backchannel_stream* stream_data); // Updated constructor
     virtual ~BackchannelSink();
 
-    // Static callback wrapper
-    static void afterGettingFrame(void* clientData, unsigned frameSize,
-                                  unsigned numTruncatedBytes,
-                                  struct timeval presentationTime,
-                                  unsigned durationInMicroseconds);
-    // Per-instance frame handler - now takes context
-    virtual void afterGettingFrame(BackchannelClientData* context, unsigned frameSize, unsigned numTruncatedBytes,
-                                   struct timeval presentationTime, unsigned durationInMicroseconds);
-
-    // Implementation of virtual functions:
-    virtual Boolean continuePlaying();
-    virtual void stopPlaying();
-
 private:
-    // Methods for managing the pipe
-    bool startPipe();
-    void closePipe();
-    bool writeToPipe(u_int8_t* data, unsigned size);
+    // Helper struct for client source callbacks
+    struct ClientSourceContext {
+        BackchannelSink* sink; // Renamed from selector
+        FramedSource* source;
+    };
 
-    // --- Members for the "last source controls" logic with fallback ---
-    FramedSource* fControllingSource; // The source currently allowed to send data
-    std::list<FramedSource*> fClientSources; // Keep track of client sources in order of addition for fallback
-    std::map<FramedSource*, BackchannelClientData*> fSourceContexts; // Map sources to their callback contexts
-    // --- End of control logic members ---
+    // Static callback wrapper for frames coming *from* client sources (remains same)
+    static void incomingDataHandler(void* clientData, unsigned frameSize,
+                                    unsigned numTruncatedBytes,
+                                    struct timeval presentationTime,
+                                    unsigned durationInMicroseconds);
+    // Per-instance handler for frames coming *from* client sources (updated signature)
+    void handleIncomingData(ClientSourceContext* context, unsigned frameSize, unsigned numTruncatedBytes);
 
-    u_int8_t* fReceiveBuffer;
-    static const unsigned kReceiveBufferSize = 1024; // Adjust as needed
+    // Static callback for client source closure (remains same)
+    static void sourceClosureHandler(void* clientData);
+    void handleSourceClosure(FramedSource* source);
 
-    // Member for the pipe
-    FILE* fPipe; // File pointer for the popen stream
 
-    // State variable to track if playing
-    bool fIsPlaying;
+    // Overridden virtual methods for FramedSource (These might become NO-OPs or simplified)
+    virtual void doGetNextFrame(); // This source doesn't produce frames for Live555 pipeline
+    virtual void doStopGettingFrames(); // Needs to stop requesting from clients
+
+    // --- Members for managing client sources ---
+    FramedSource* fControllingSource; // The client source currently allowed to send data
+    std::list<FramedSource*> fClientSources; // Keep track of client sources for fallback
+    std::map<FramedSource*, ClientSourceContext*> fSourceContexts; // Map sources to their callback contexts
+
+    // --- Members for receiving data and queuing ---
+    u_int8_t* fClientReceiveBuffer; // Buffer to receive data *from* clients
+    static const unsigned kClientReceiveBufferSize = 2048; // Max expected RTP packet size? Adjust as needed.
+    backchannel_stream* fStream; // Pointer to the shared stream state (queue, flags)
+    MsgChannel<std::vector<uint8_t>>* fInputQueue; // Pointer to the worker's input queue (convenience, points into fStream)
+
+    bool fIsCurrentlyGettingFrames; // Track if we should be actively getting frames from clients
+
+    // --- Removed members related to downstream delivery ---
+    // std::vector<u_int8_t> fLastDeliveredFrame;
+    // unsigned fLastFrameSize;
+    // struct timeval fLastPresentationTime;
+    // unsigned fLastDurationInMicroseconds;
+    // TaskToken fNextTask;
+    // void deliverFrame();
 };
 
-#endif // BACKCHANNEL_SINK_HPP
+#endif // BACKCHANNEL_SINK_FRAMED_SOURCE_HPP
