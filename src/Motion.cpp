@@ -177,19 +177,74 @@ int Motion::init()
              ", width:" << move_param.frameInfo.width << 
              ", height:" << move_param.frameInfo.height);
 
-    move_param.roiRect[0].p0.x = cfg->motion.roi_0_x;
-    move_param.roiRect[0].p0.y = cfg->motion.roi_0_y;
-    move_param.roiRect[0].p1.x = cfg->motion.roi_1_x - 1;
-    move_param.roiRect[0].p1.y = cfg->motion.roi_1_y - 1;
-    move_param.roiRectCnt = cfg->motion.roi_count;
+    // Validate grid dimensions from config
+    if (cfg->motion.grid_cols <= 0 || cfg->motion.grid_rows <= 0) {
+        LOG_ERROR("Motion grid dimensions (cols=" << cfg->motion.grid_cols << ", rows=" << cfg->motion.grid_rows << ") must be positive.");
+        return -1; // Or handle error appropriately
+    }
 
-    LOG_INFO("Motion detection roi[0]:" << 
-             " roi_0_x: " << cfg->motion.roi_0_x << 
-             ", roi_0_y:" << cfg->motion.roi_0_y << 
-             ", roi_1_x: " << cfg->motion.roi_1_x << 
-             ", roi_1_y:" << cfg->motion.roi_1_y);
+    // Calculate cell dimensions based on frame size and grid config
+    int cell_width = move_param.frameInfo.width / cfg->motion.grid_cols;
+    int cell_height = move_param.frameInfo.height / cfg->motion.grid_rows;
+    if (cell_width <= 0 || cell_height <= 0) {
+         LOG_ERROR("Calculated motion cell dimensions are invalid (" << cell_width << "x" << cell_height << "). Check frame ("
+                   << move_param.frameInfo.width << "x" << move_param.frameInfo.height << ") and grid ("
+                   << cfg->motion.grid_cols << "x" << cfg->motion.grid_rows << ") dimensions.");
+         return -1;
+    }
 
+    // Iterate through grid cells and populate active ROIs based on the roi_mask vector
+    int active_roi_count = 0;
+    // uint64_t mask = cfg->motion.active_cell_mask; // Removed mask usage
+    int total_cells = cfg->motion.grid_cols * cfg->motion.grid_rows;
+
+    // Determine the actual hardware limit
+    const int max_roi_limit = IMP_IVS_MOVE_MAX_ROI_CNT;
+    LOG_INFO("Motion grid configured to " << cfg->motion.grid_cols << "x" << cfg->motion.grid_rows << " (" << total_cells << " cells). Hardware ROI limit: " << max_roi_limit);
+
+    for (int cell_index = 0; cell_index < total_cells; ++cell_index) {
+        // Check if the index is valid and the corresponding boolean is true in the roi_mask vector
+        if (cell_index < cfg->motion.roi_mask.size() && cfg->motion.roi_mask[cell_index]) {
+            // Check if we have reached the hardware limit
+            if (active_roi_count >= max_roi_limit) {
+                LOG_WARN("Hardware ROI limit (" << max_roi_limit << ") reached. Ignoring remaining active grid cells.");
+                break; // Stop adding ROIs
+            }
+
+            int row = cell_index / cfg->motion.grid_cols;
+            int col = cell_index % cfg->motion.grid_cols;
+
+            // Calculate coordinates based on cell_width, cell_height, row, col
+            int p0x = col * cell_width;
+            int p0y = row * cell_height;
+            // Calculate end coordinates, clamp to frame boundaries, ensure p1 >= p0
+            int p1x = std::min((col + 1) * cell_width, (int)move_param.frameInfo.width) - 1;
+            int p1y = std::min((row + 1) * cell_height, (int)move_param.frameInfo.height) - 1;
+            p1x = std::max(p0x, p1x); // Ensure p1.x >= p0.x
+            p1y = std::max(p0y, p1y); // Ensure p1.y >= p0.y
+
+            move_param.roiRect[active_roi_count].p0.x = p0x;
+            move_param.roiRect[active_roi_count].p0.y = p0y;
+            move_param.roiRect[active_roi_count].p1.x = p1x;
+            move_param.roiRect[active_roi_count].p1.y = p1y;
+
+            LOG_INFO("Adding active motion ROI " << active_roi_count << " for grid cell (" << col << "," << row << "): p0("
+                     << p0x << "," << p0y << "), p1(" << p1x << "," << p1y << ")");
+
+            active_roi_count++;
+        }
+    }
+
+    move_param.roiRectCnt = active_roi_count; // Set the count of ROIs actually added
+    LOG_INFO("Total active motion ROIs configured for hardware: " << active_roi_count);
+
+
+    // Create the IVS interface with the populated parameters
     move_intf = IMP_IVS_CreateMoveInterface(&move_param);
+    if (move_intf == nullptr) {
+        LOG_ERROR("Failed to create IVS Move Interface.");
+        return -1;
+    }
 
     ret = IMP_IVS_CreateChn(ivsChn, move_intf);
     LOG_DEBUG_OR_ERROR_AND_EXIT(ret, "IMP_IVS_CreateChn(" << ivsChn << ", move_intf)");
