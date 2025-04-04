@@ -225,16 +225,18 @@ std::vector<ConfigItem<int>> CFG::getIntItems()
         {"motion.cooldown_time", motion.cooldown_time, 5, validateIntGe0},
         {"motion.init_time", motion.init_time, 5, validateIntGe0},
         {"motion.min_time", motion.min_time, 1, validateIntGe0},
-        {"motion.sensitivity", motion.sensitivity, 1, validateIntGe0},
+        {"motion.sensitivity", motion.sensitivity, 1, [](const int &v) { return v >= 0 && v <= 4; } }, // Sensitivity range is 0-4
         {"motion.skip_frame_count", motion.skip_frame_count, 5, validateIntGe0},
         {"motion.frame_width", motion.frame_width, IVS_AUTO_VALUE, validateIntGe0},
         {"motion.frame_height", motion.frame_height, IVS_AUTO_VALUE, validateIntGe0},
         {"motion.monitor_stream", motion.monitor_stream, 1, validateInt1},
-        {"motion.roi_0_x", motion.roi_0_x, 0, validateIntGe0},
-        {"motion.roi_0_y", motion.roi_0_y, 0, validateIntGe0},
-        {"motion.roi_1_x", motion.roi_1_x, IVS_AUTO_VALUE, validateIntGe0},
-        {"motion.roi_1_y", motion.roi_1_y, IVS_AUTO_VALUE, validateIntGe0},
-        {"motion.roi_count", motion.roi_count, 1, [](const int &v) { return v >= 1 && v <= 52; }},
+        // {"motion.roi_0_x", motion.roi_0_x, 0, validateIntGe0}, // Removed
+        // {"motion.roi_0_y", motion.roi_0_y, 0, validateIntGe0}, // Removed
+        // {"motion.roi_1_x", motion.roi_1_x, IVS_AUTO_VALUE, validateIntGe0}, // Removed
+        // {"motion.roi_1_y", motion.roi_1_y, IVS_AUTO_VALUE, validateIntGe0}, // Removed
+        // {"motion.roi_count", motion.roi_count, 1, [](const int &v) { return v >= 1 && v <= 52; }}, // Removed
+        {"motion.grid_cols", motion.grid_cols, 10, [](const int &v) { return v > 0; }}, // Added, default 10
+        {"motion.grid_rows", motion.grid_rows, 5, [](const int &v) { return v > 0; }}, // Added, default 5
         {"rtsp.est_bitrate", rtsp.est_bitrate, 5000, validateIntGe0},
         {"rtsp.out_buffer_size", rtsp.out_buffer_size, 500000, validateIntGe0},
         {"rtsp.port", rtsp.port, 554, validateInt65535},
@@ -582,19 +584,41 @@ bool CFG::updateConfig()
 
     Setting &root = lc.getRoot();
 
-    if (root.exists("rois"))
-        root.remove("rois");
+    // Remove old active_cell_mask saving logic
+    // std::string mask_path = "motion.active_cell_mask";
+    // ensurePathExists(root, mask_path); // Ensure motion group exists
+    // Setting &motion_setting = root.lookup("motion");
+    // if (motion_setting.exists("active_cell_mask")) {
+    //     motion_setting.remove("active_cell_mask");
+    // }
+    // std::stringstream ss;
+    // ss << "0x" << std::hex << motion.active_cell_mask; // Save as hex string
+    // motion_setting.add("active_cell_mask", Setting::TypeString) = ss.str();
+    // LOG_DEBUG("Saving motion.active_cell_mask: " << ss.str());
 
-    Setting &rois = root.add("rois", Setting::TypeGroup);
-
-    for (int i = 0; i < motion.roi_count; i++)
-    {
-        Setting &entry = rois.add("roi_" + std::to_string(i), Setting::TypeArray);
-        entry.add(Setting::TypeInt) = motion.rois[i].p0_x;
-        entry.add(Setting::TypeInt) = motion.rois[i].p0_y;
-        entry.add(Setting::TypeInt) = motion.rois[i].p1_x;
-        entry.add(Setting::TypeInt) = motion.rois[i].p1_y;
+    // Save individual motion.roi_X settings
+    Setting &motion_setting = root.lookup("motion"); // Assuming motion group exists from other settings
+    int total_cells = motion.grid_cols * motion.grid_rows;
+    for (int i = 0; i < total_cells; ++i) {
+        std::string roi_path = "roi_" + std::to_string(i);
+        // Remove existing setting if it exists, to ensure correct type
+        if (motion_setting.exists(roi_path)) {
+            motion_setting.remove(roi_path);
+        }
+        // Add the boolean setting
+        bool value = (i < motion.roi_mask.size()) ? motion.roi_mask[i] : true; // Default to true if vector is somehow smaller
+        motion_setting.add(roi_path, Setting::TypeBoolean) = value;
     }
+    LOG_DEBUG("Saved " << total_cells << " motion.roi_X settings.");
+
+
+    // Remove old rois group saving logic (already commented out/removed in previous step)
+    // Ensure the old 'rois' group is definitely removed if it somehow exists
+    if (root.exists("rois")) {
+         LOG_WARN("Removing obsolete 'rois' group from config during save.");
+         root.remove("rois");
+    }
+
 
     lc.writeFile(filePath);
     LOG_DEBUG("Config is written to " << filePath);
@@ -625,6 +649,34 @@ void CFG::load()
     for (auto &item : uintItems)
         handleConfigItem(lc, item);
 
+    // Remove old active_cell_mask loading logic
+    // std::string mask_str;
+    // motion.active_cell_mask = motion.active_cell_mask; // Initialize with default from header
+    // if (lc.lookupValue("motion.active_cell_mask", mask_str)) { ... }
+
+    // Load individual motion.roi_X settings
+    if (motion.grid_cols > 0 && motion.grid_rows > 0) {
+        int total_cells = motion.grid_cols * motion.grid_rows;
+        motion.roi_mask.resize(total_cells, true); // Resize and default all to true initially
+        LOG_DEBUG("Loading " << total_cells << " motion.roi_X settings...");
+        for (int i = 0; i < total_cells; ++i) {
+            std::string roi_path = "motion.roi_" + std::to_string(i);
+            bool value;
+            if (lc.lookupValue(roi_path, value)) {
+                motion.roi_mask[i] = value;
+            } else {
+                // If setting is missing, keep the default 'true'
+                LOG_WARN("'" << roi_path << "' not found in config. Defaulting to true.");
+                motion.roi_mask[i] = true;
+            }
+        }
+        LOG_DEBUG("Finished loading motion.roi_X settings.");
+    } else {
+        LOG_ERROR("Invalid grid dimensions (" << motion.grid_cols << "x" << motion.grid_rows << "). Cannot load motion ROI mask.");
+        motion.roi_mask.clear(); // Ensure mask is empty if grid is invalid
+    }
+
+
     if (stream2.jpeg_channel == 0)
     {
         stream2.width = stream0.width;
@@ -633,26 +685,24 @@ void CFG::load()
     else
     {
         stream2.width = stream1.width;
-        stream2.height = stream1.height;        
+        stream2.height = stream1.height;
     }
 
-    Setting &root = lc.getRoot();
+    // Setting &root = lc.getRoot(); // No longer needed here
 
-    if (root.exists("rois"))
-    {
-        Setting &rois = root.lookup("rois");
-        for (int i = 0; i < motion.roi_count; i++)
-        {
-            if (rois.exists("roi_" + std::to_string(i)))
-            {
-                if (rois[i].getLength() == 4)
-                {
-                    motion.rois[i].p0_x = rois[i][0];
-                    motion.rois[i].p0_y = rois[i][1];
-                    motion.rois[i].p1_x = rois[i][2];
-                    motion.rois[i].p1_y = rois[i][3];
-                }
-            }
-        }
-    }
+    // Remove old rois group loading logic
+    // if (root.exists("rois"))
+    // {
+    //     Setting &rois = root.lookup("rois");
+    //     for (int i = 0; i < motion.roi_count; i++) // motion.roi_count is removed
+    //     {
+    //         if (rois.exists("roi_" + std::to_string(i)))
+    //         {
+    //             if (rois[i].getLength() == 4)
+    //             {
+    //                 // motion.rois is removed
+    //             }
+    //         }
+    //     }
+    // }
 }

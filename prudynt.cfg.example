@@ -245,9 +245,28 @@ motion: {
 	# skip_frame_count: 5;  # Number of frames to skip for motion detection (to reduce CPU load).
 	# frame_width: 1920;  # Width of the frame used for motion detection.
 	# frame_height: 1080;  # Height of the frame used for motion detection.
-	# roi_0_x: 0;  # X coordinate of the top-left corner of the first Region Of Interest (ROI).
-	# roi_0_y: 0;  # Y coordinate of the top-left corner of the first ROI.
-	# roi_1_x: 1920;  # X coordinate of the bottom-right corner of the first ROI.
-	# roi_1_y: 1080;  # Y coordinate of the bottom-right corner of the first ROI.
-	# roi_count: 1;  # Number of active Regions Of Interest
+
+	# Grid settings for motion detection zones
+	# Define the grid dimensions. The total number of cells (grid_cols * grid_rows)
+	# can exceed the hardware limit, but only the first N active cells (up to the limit)
+	# specified by active_cell_mask will be used.
+	# Hardware limits: T20=16 ROIs, T31=52 ROIs.
+	# Suggested values for 16:9 aspect ratio preference:
+	# - For 16 ROI limit (e.g., T20): grid_cols = 5, grid_rows = 3 (15 cells total)
+	# - For 52 ROI limit (e.g., T31): grid_cols = 10, grid_rows = 5 (50 cells total)
+	grid_cols = 10; # Default (Recommended for T31)
+	grid_rows = 5;  # Default (Recommended for T31)
+
+	# Motion ROI configuration:
+	# For each cell in the grid (grid_cols * grid_rows), specify whether it's active.
+	# Cells are numbered 0 to N-1, starting top-left, going across columns, then down rows.
+	# Example for a 10x5 grid (50 cells):
+	# roi_0 = true;   # Top-left cell
+	# roi_1 = true;
+	# ...
+	# roi_49 = false; # Bottom-right cell
+	# By default, if a roi_X setting is missing, it's considered true.
+	# Add lines below to disable specific cells:
+	# roi_0 = false;
+	# roi_10 = false;
 };

@@ -5,6 +5,7 @@
 #include <chrono>
 #include <iostream>
 #include <functional>
+#include <vector> // Added for std::vector
 #include <libconfig.h++>
 #include <sys/time.h>
 #include <any>
@@ -249,12 +250,16 @@ struct _motion {
     int frame_height;
     int roi_0_x;
     int roi_0_y;
-    int roi_1_x;
-    int roi_1_y;
-    int roi_count;
+    int roi_1_x; // Keep temporarily for compatibility during transition? No, plan says remove.
+    int roi_1_y; // Keep temporarily for compatibility during transition? No, plan says remove.
+    // int roi_count; // Removed, grid dimensions define the count
     bool enabled;
     const char *script_path;
-    std::array<roi, 52> rois;
+    // std::array<roi, 52> rois; // Removed, replaced by grid + mask
+    int grid_cols{10}; // Default for T31
+    int grid_rows{5};  // Default for T31
+    // uint64_t active_cell_mask{0xFFFFFFFFFFFFFFFF}; // Replaced by roi_mask
+    std::vector<bool> roi_mask; // Holds boolean state for each grid cell
 };
 struct _websocket {
     bool enabled;
