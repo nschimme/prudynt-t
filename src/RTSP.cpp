@@ -1,6 +1,6 @@
 #include "RTSP.hpp"
-#include "CustomRTSPServer.hpp" // Added for custom server
-#include "BackchannelServerMediaSubsession.hpp" // Added for backchannel subsession
+#include "BackchannelServerMediaSubsession.hpp"
+#include "BackchannelSink.hpp"
 
 #define MODULE "RTSP"
 
@@ -81,13 +81,9 @@ void RTSP::addSubsession(int chnNr, _stream &stream)
     }
 #endif
 
-    // Add the backchannel audio subsession (receive only) conditionally
     if (cfg->rtsp.backchannel) {
-        BackchannelServerMediaSubsession* backchannelSub = BackchannelServerMediaSubsession::createNew(*env);
+        BackchannelServerMediaSubsession* backchannelSub = BackchannelServerMediaSubsession::createNew(*env, fBackchannelSink);
         sms->addSubsession(backchannelSub);
-        LOG_INFO("Backchannel audio subsession added to session for stream " << chnNr);
-    } else {
-        LOG_INFO("Backchannel audio disabled by configuration for stream " << chnNr);
     }
 
     rtspServer->addServerMediaSession(sms);
@@ -100,6 +96,20 @@ void RTSP::start()
 {
     scheduler = BasicTaskScheduler::createNew();
     env = BasicUsageEnvironment::createNew(*scheduler);
+
+    // Create the BackchannelSink early if enabled
+    if (cfg->rtsp.backchannel) {
+        fBackchannelSink = BackchannelSink::createNew(*env);
+        if (fBackchannelSink == nullptr) {
+             LOG_ERROR("Failed to create BackchannelSink!");
+             // Handle error appropriately - maybe return or throw
+             // For now, let it proceed but log the error.
+        } else {
+             LOG_DEBUG("BackchannelSink created successfully.");
+        }
+    } else {
+        fBackchannelSink = nullptr; // Ensure it's null if not enabled
+    }
     
     if (cfg->rtsp.auth_required)
     {
@@ -107,13 +117,11 @@ void RTSP::start()
         auth->addUserRecord(
             cfg->rtsp.username,
             cfg->rtsp.password);
-        // Use CustomRTSPServer
-        rtspServer = CustomRTSPServer::createNew(*env, cfg->rtsp.port, auth, cfg->rtsp.session_reclaim);
+        rtspServer = RTSPServer::createNew(*env, cfg->rtsp.port, auth, cfg->rtsp.session_reclaim);
     }
     else
     {
-        // Use CustomRTSPServer
-        rtspServer = CustomRTSPServer::createNew(*env, cfg->rtsp.port, nullptr, cfg->rtsp.session_reclaim);
+        rtspServer = RTSPServer::createNew(*env, cfg->rtsp.port, nullptr, cfg->rtsp.session_reclaim);
     }
     if (rtspServer == NULL)
     {
@@ -173,12 +181,21 @@ void RTSP::start()
     LOG_DEBUG("Stop RTSP Server.");
 
     // Cleanup RTSP server and environment
-    Medium::close(rtspServer);
-    env->reclaim();
+    Medium::close(rtspServer); // Close RTSP server first
+
+    // Close the backchannel sink *before* reclaiming the environment
+    if (fBackchannelSink != nullptr)
+    {
+        LOG_DEBUG("Closing BackchannelSink.");
+        Medium::close(fBackchannelSink);
+        fBackchannelSink = nullptr;
+    }
+
+    env->reclaim(); // Reclaim environment *after* closing sink
     delete scheduler;
 }
 
-void* RTSP::run(void* arg) {
+void *RTSP::run(void* arg) {
     ((RTSP*)arg)->start();
     return nullptr;
 }
