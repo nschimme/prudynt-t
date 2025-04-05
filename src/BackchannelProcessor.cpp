@@ -13,11 +13,11 @@
 
 #define MODULE "BackchannelProcessor"
 
-// Helper to map RTP payload type to IMP payload type
-IMPAudioPalyloadType BackchannelProcessor::mapRtpToImpPayloadType(uint8_t rtpPayloadType) {
-    switch (rtpPayloadType) {
-        case 0: return PT_G711U; // PCMU
-        case 8: return PT_G711A; // PCMA
+// Helper to map IMPBackchannelFormat enum to IMP payload type
+IMPAudioPalyloadType BackchannelProcessor::mapFormatToImpPayloadType(IMPBackchannelFormat format) {
+    switch (format) {
+        case IMPBackchannelFormat::PCMU: return PT_G711U;
+        case IMPBackchannelFormat::PCMA: return PT_G711A;
         default: return PT_MAX;
     }
 }
@@ -127,14 +127,15 @@ bool BackchannelProcessor::handleIdleState() {
         closePipe();
     }
     // Wait efficiently for activity or shutdown.
-    std::vector<uint8_t> rtpPacket = fStream->inputQueue->wait_read();
+    // Read BackchannelFrame instead of raw vector
+    BackchannelFrame frame = fStream->inputQueue->wait_read();
 
     // Check running flag after wake-up
     if (!fStream->running) {
         return false; // Signal to stop main loop
     }
 
-    // Discard any packet read while transitioning from idle,
+    // Discard any frame read while transitioning from idle,
     // loop will re-check active_sessions.
     return true; // Continue main loop
 }
@@ -152,40 +153,42 @@ bool BackchannelProcessor::handleActiveState() {
     }
 
     // Pipe should be open now, wait for data
-    std::vector<uint8_t> rtpPacket = fStream->inputQueue->wait_read();
+    // Read BackchannelFrame instead of raw vector
+    BackchannelFrame frame = fStream->inputQueue->wait_read();
 
     // Check running flag immediately after waking up
     if (!fStream->running) {
         return false; // Signal to stop main loop
     }
 
-    if (rtpPacket.empty()) {
+    if (frame.payload.empty()) { // Check if payload is empty
         // Can happen if queue is notified to wake up for shutdown
         return true; // Continue main loop
     }
 
-    // Process the received packet
-    if (!processPacket(rtpPacket)) {
-        // processPacket returns false on critical errors (like pipe write failure)
+    // Process the received frame
+    if (!processFrame(frame)) { // Pass the frame struct
+        // processFrame returns false on critical errors (like pipe write failure)
         return false; // Signal to stop main loop
     }
 
     return true; // Continue main loop
 }
 
-// Decodes a packet based on RTP payload type
-bool BackchannelProcessor::decodePacket(const uint8_t* payload, size_t payloadSize, uint8_t rtpPayloadType, std::vector<int16_t>& outPcmBuffer, int& outSampleRate) {
-    IMPAudioPalyloadType impPayloadType = mapRtpToImpPayloadType(rtpPayloadType);
+// Decodes a frame based on its format
+bool BackchannelProcessor::decodeFrame(const uint8_t* payload, size_t payloadSize, IMPBackchannelFormat format, std::vector<int16_t>& outPcmBuffer, int& outSampleRate) {
+    IMPAudioPalyloadType impPayloadType = mapFormatToImpPayloadType(format);
     if (impPayloadType == PT_MAX) {
-        LOG_WARN("Unsupported RTP payload type received: " << static_cast<int>(rtpPayloadType));
+        LOG_WARN("Unsupported BackchannelFormat received: " << static_cast<int>(format));
         return false; // Indicate failure for unsupported type
     }
 
     // --- G.711 Decoding ---
     if (impPayloadType == PT_G711A || impPayloadType == PT_G711U) {
-        int adChn = IMPBackchannel::getADECChannel(impPayloadType);
+        // Use the format enum directly with getADECChannel
+        int adChn = IMPBackchannel::getADECChannel(format);
         if (adChn < 0) {
-            LOG_WARN("No ADEC channel ready for payload type: " << static_cast<int>(rtpPayloadType));
+            LOG_WARN("No ADEC channel ready for format: " << static_cast<int>(format));
             return false; // Indicate failure
         }
 
@@ -209,7 +212,12 @@ bool BackchannelProcessor::decodePacket(const uint8_t* payload, size_t payloadSi
             outPcmBuffer.assign(reinterpret_cast<int16_t*>(stream_out.stream),
                               reinterpret_cast<int16_t*>(stream_out.stream) + num_samples);
             IMP_ADEC_ReleaseStream(adChn, &stream_out);
-            outSampleRate = 8000; // G.711 is always 8kHz
+            // Look up frequency using the helper function
+            outSampleRate = IMPBackchannel::getFrequency(format);
+            if (outSampleRate == 0) {
+                 LOG_ERROR("Failed to get frequency for format: " << static_cast<int>(format));
+                 return false; // Indicate failure if frequency is unknown
+            }
             return true;
         } else if (ret != 0) {
             LOG_ERROR("IMP_ADEC_GetStream failed for channel " << adChn << ": " << ret);
@@ -223,9 +231,9 @@ bool BackchannelProcessor::decodePacket(const uint8_t* payload, size_t payloadSi
     }
 
     // --- Add other decoders here (e.g., Opus) ---
-    // else if (impPayloadType == PT_OPUS) { ... }
+    // else if (format == IMPBackchannelFormat::OPUS) { ... }
 
-    LOG_ERROR("Decoder logic not implemented for payload type: " << static_cast<int>(rtpPayloadType));
+    LOG_ERROR("Decoder logic not implemented for format: " << static_cast<int>(format));
     return false; // Indicate failure
 }
 
@@ -257,29 +265,14 @@ bool BackchannelProcessor::writePcmToPipe(const std::vector<int16_t>& pcmBuffer)
 }
 
 
-// Processes a single RTP packet: decode, resample, write
-bool BackchannelProcessor::processPacket(const std::vector<uint8_t>& rtpPacket) {
-    // --- Parse RTP Header ---
-    const unsigned RtpHeaderSize = 12;
-    if (rtpPacket.size() < RtpHeaderSize) {
-        LOG_WARN("Received packet too small for RTP header (" << rtpPacket.size() << " bytes). Discarding.");
-        return true; // Continue processing next packet
-    }
-    uint8_t rtpPayloadType = rtpPacket[1] & 0x7F;
-    unsigned headerSize = RtpHeaderSize; // Assuming no extensions/CSRC
-    if (rtpPacket.size() <= headerSize) {
-        LOG_WARN("Received RTP packet with no payload. Discarding.");
-        return true; // Continue processing next packet
-    }
-    const uint8_t* encodedPayload = rtpPacket.data() + headerSize;
-    unsigned encodedPayloadSize = rtpPacket.size() - headerSize;
-
+// Processes a single BackchannelFrame: decode, resample, write
+bool BackchannelProcessor::processFrame(const BackchannelFrame& frame) {
     // --- Decode ---
     std::vector<int16_t> decoded_pcm;
-    int input_rate = 0;
-    if (!decodePacket(encodedPayload, encodedPayloadSize, rtpPayloadType, decoded_pcm, input_rate)) {
-        // Error already logged in decodePacket
-        return true; // Continue processing next packet
+    int input_rate = 0; // This will be set by decodeFrame based on format lookup
+    if (!decodeFrame(frame.payload.data(), frame.payload.size(), frame.format, decoded_pcm, input_rate)) {
+        // Error already logged in decodeFrame
+        return true; // Continue processing next frame
     }
 
     // --- Resample if necessary ---

@@ -12,6 +12,7 @@
 #include "IMPAudio.hpp"
 #include "IMPEncoder.hpp"
 #include "IMPFramesource.hpp"
+#include "IMPBackchannel.hpp" // Include definition for IMPBackchannelFormat
 
 #define MSG_CHANNEL_SIZE 20
 #define BACKCHANNEL_QUEUE_SIZE 30 // Define queue size for backchannel
@@ -36,6 +37,18 @@ struct H264NALUnit
 	int64_t imp_ts;
     */
 };
+
+// Struct for parsed backchannel audio data
+struct BackchannelFrame
+{
+	std::vector<uint8_t> payload; // Raw audio payload (e.g., PCMU, PCMA)
+	IMPBackchannelFormat format;  // Use the enum type for format
+	// unsigned frequency;        // Removed: Processor will look this up via IMPBackchannel based on format
+	struct timeval timestamp;     // Presentation timestamp from RTP header
+	// uint32_t rtpTimestamp;     // Optional: Raw RTP timestamp if needed
+	// uint16_t sequenceNumber;   // Optional: RTP sequence number if needed
+};
+
 
 struct jpeg_stream
 {
@@ -125,16 +138,15 @@ struct video_stream
  // Structure for Backchannel Processing State
  struct backchannel_stream
  {
-     // Using vector<uint8_t> to represent raw RTP packet data
-     // Using vector<uint8_t> to represent raw RTP packet data
-     std::shared_ptr<MsgChannel<std::vector<uint8_t>>> inputQueue;
+     // Changed MsgChannel type to use the new BackchannelFrame struct
+     std::shared_ptr<MsgChannel<BackchannelFrame>> inputQueue;
      pthread_t thread;
      std::atomic<bool> running; // Controls thread lifetime
      std::atomic<int> active_sessions{0}; // Counter for active client sessions
      std::binary_semaphore has_started{0}; // For startup synchronization
 
      backchannel_stream()
-         : inputQueue(std::make_shared<MsgChannel<std::vector<uint8_t>>>(BACKCHANNEL_QUEUE_SIZE)),
+         : inputQueue(std::make_shared<MsgChannel<BackchannelFrame>>(BACKCHANNEL_QUEUE_SIZE)), // Updated type
            running(false) {}
  };
 

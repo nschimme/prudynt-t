@@ -3,6 +3,7 @@
 #include "BackchannelSink.hpp"
 #include "Logger.hpp"
 #include "globals.hpp" // For backchannel_stream definition
+#include "IMPBackchannel.hpp" // Include definition for IMPBackchannelFormat and constants
 
 // Live555 Headers
 #include <NetAddress.hh> // Moved include earlier
@@ -21,9 +22,9 @@
 #define MODULE "BackchannelSubsession"
 
 // Define payload types (consistent with sdpLines)
-#define PCMU_PAYLOAD_TYPE 0
-#define PCMA_PAYLOAD_TYPE 8
-#define BACKCHANNEL_TIMESTAMP_FREQ 8000 // 8 kHz for PCMU/PCMA
+// #define PCMU_PAYLOAD_TYPE 0 // Replaced by enum
+// #define PCMA_PAYLOAD_TYPE 8 // Replaced by enum
+// #define BACKCHANNEL_TIMESTAMP_FREQ 8000 // Replaced by constants
 
 // ---------------------------------------------------------------------------
 // BackchannelServerMediaSubsession Implementation
@@ -87,15 +88,15 @@ char const* BackchannelServerMediaSubsession::sdpLines(int /*addressFamily*/) {
                  "m=audio 0 RTP/AVP %d %d\r\n"
                  "c=IN IP4 0.0.0.0\r\n"
                  "b=AS:64\r\n"
-                 "a=rtpmap:%d PCMU/%d/1\r\n"
-                 "a=rtpmap:%d PCMA/%d/1\r\n"
-                 "a=control:%s\r\n"
-                 "a=recvonly\r\n",
-                 PCMU_PAYLOAD_TYPE, PCMA_PAYLOAD_TYPE,
-                 PCMU_PAYLOAD_TYPE, BACKCHANNEL_TIMESTAMP_FREQ,
-                 PCMA_PAYLOAD_TYPE, BACKCHANNEL_TIMESTAMP_FREQ,
-                 trackId()
-        );
+                  "a=rtpmap:%d PCMU/%u/1\r\n" // Use %u for unsigned frequency
+                  "a=rtpmap:%d PCMA/%u/1\r\n" // Use %u for unsigned frequency
+                  "a=control:%s\r\n"
+                  "a=recvonly\r\n",
+                  IMPBackchannel::rtpPayloadTypeFromFormat(IMPBackchannelFormat::PCMU), IMPBackchannel::rtpPayloadTypeFromFormat(IMPBackchannelFormat::PCMA), // Use helpers
+                  IMPBackchannel::rtpPayloadTypeFromFormat(IMPBackchannelFormat::PCMU), IMPBackchannel::getFrequency(IMPBackchannelFormat::PCMU), // Use helpers
+                  IMPBackchannel::rtpPayloadTypeFromFormat(IMPBackchannelFormat::PCMA), IMPBackchannel::getFrequency(IMPBackchannelFormat::PCMA), // Use helpers
+                  trackId()
+         );
 
         fSDPLines[sdpLinesSize - 1] = '\0'; // Null-terminate
     }
@@ -106,15 +107,17 @@ char const* BackchannelServerMediaSubsession::sdpLines(int /*addressFamily*/) {
 MediaSink* BackchannelServerMediaSubsession::createNewStreamDestination(unsigned clientSessionId, unsigned& estBitrate) {
     estBitrate = 64; // kbps
     LOG_DEBUG("Creating new BackchannelSink for client session " << clientSessionId);
-    return BackchannelSink::createNew(envir(), fStreamData);
+    // Reverted: Call createNew without format/frequency
+    return BackchannelSink::createNew(envir(), fStreamData, clientSessionId);
 }
 
 // Creates the RTPSource (e.g., SimpleRTPSource) - Kept from original
 RTPSource* BackchannelServerMediaSubsession::createNewRTPSource(Groupsock* rtpGroupsock, unsigned char /*rtpPayloadTypeIfDynamic*/, MediaSink* /*outputSink*/) {
     LOG_DEBUG("Creating new SimpleRTPSource for backchannel");
     // Payload type doesn't matter much for SimpleRTPSource when receiving static types
+    // Use one of the defined frequency constants (e.g., for PCMU)
     return SimpleRTPSource::createNew(envir(), rtpGroupsock, 0 /* Placeholder PT */,
-                                      BACKCHANNEL_TIMESTAMP_FREQ, nullptr /* mime type */,
+                                      IMP_BACKCHANNEL_FREQ_PCMU, nullptr /* mime type */,
                                       0 /* num channels */,
                                       False /* no RTCP - handled by StreamState */);
 }

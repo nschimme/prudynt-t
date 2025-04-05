@@ -17,8 +17,8 @@ public:
     void run();
 
 private:
-    // Helper to map RTP payload type to IMP payload type
-    IMPAudioPalyloadType mapRtpToImpPayloadType(uint8_t rtpPayloadType);
+    // Helper to map IMPBackchannelFormat enum to IMP payload type
+    IMPAudioPalyloadType mapFormatToImpPayloadType(IMPBackchannelFormat format);
 
     // Simple linear resampling helper
     static std::vector<int16_t> resampleLinear(const std::vector<int16_t>& input_pcm, int input_rate, int output_rate);
@@ -31,9 +31,9 @@ private:
     bool handleIdleState();
     bool handleActiveState();
 
-    // Packet processing pipeline
-    bool processPacket(const std::vector<uint8_t>& rtpPacket);
-    bool decodePacket(const uint8_t* payload, size_t payloadSize, uint8_t rtpPayloadType, std::vector<int16_t>& outPcmBuffer, int& outSampleRate);
+    // Frame processing pipeline (updated signatures)
+    bool processFrame(const BackchannelFrame& frame);
+    bool decodeFrame(const uint8_t* payload, size_t payloadSize, IMPBackchannelFormat format, std::vector<int16_t>& outPcmBuffer, int& outSampleRate);
     bool writePcmToPipe(const std::vector<int16_t>& pcmBuffer);
 
     backchannel_stream* fStream; // Pointer to shared stream data (queue, running flag)

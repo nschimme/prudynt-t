@@ -8,18 +8,26 @@
 #include <vector> // Needed for MsgChannel template
 #include <cstdint> // Needed for uint8_t
 #include <atomic> // For std::atomic<bool>
+#include <sys/time.h> // For struct timeval, gettimeofday
 
 #include "Logger.hpp"
 #include "MsgChannel.hpp" // Include MsgChannel definition
-#include "globals.hpp"    // Include globals to get backchannel_stream definition
+// #include "globals.hpp" // Removed include to break cycle
+#include "IMPBackchannel.hpp" // Include definition for IMPBackchannelFormat
+// #include "globals.hpp" // Removed include
 
 // Forward declarations
 class RTPSource; // The source we will consume from
+class TaskScheduler; // For TaskToken
+struct backchannel_stream; // Forward declaration
+struct BackchannelFrame;   // Forward declaration
 
 // Inherits from MediaSink as it consumes data from an RTPSource
 class BackchannelSink : public MediaSink {
 public:
-    static BackchannelSink* createNew(UsageEnvironment& env, backchannel_stream* stream_data);
+    // Reverted createNew signature (frequency is fixed, format determined from first packet)
+    static BackchannelSink* createNew(UsageEnvironment& env, backchannel_stream* stream_data,
+                                      unsigned clientSessionId);
 
     // Method to start consuming from the source
     Boolean startPlaying(RTPSource& rtpSource,
@@ -28,15 +36,24 @@ public:
     // Method to stop consuming (called by StreamState destructor)
     void stopPlaying();
 
+    // Getter for client session ID
+    unsigned getClientSessionId() const;
 
 protected:
-    BackchannelSink(UsageEnvironment& env, backchannel_stream* stream_data);
+    // Reverted constructor signature (frequency is fixed, format determined from first packet)
+    BackchannelSink(UsageEnvironment& env, backchannel_stream* stream_data,
+                    unsigned clientSessionId);
     virtual ~BackchannelSink();
 
     // --- Required virtual methods from MediaSink ---
     virtual Boolean continuePlaying(); // Called when source has data
 
 private:
+    // Audio Data Timeout Timer logic functions (Simplified)
+    void scheduleTimeoutCheck();
+    static void timeoutCheck(void* clientData);
+    void timeoutCheck1();
+
     // Static callback wrapper for incoming frames from the RTPSource
     static void afterGettingFrame(void* clientData, unsigned frameSize,
                                   unsigned numTruncatedBytes,
@@ -51,7 +68,7 @@ private:
     u_int8_t* fReceiveBuffer; // Buffer to receive data
     static const unsigned kReceiveBufferSize = 2048; // Adjust as needed
     backchannel_stream* fStream; // Pointer to the shared stream state (queue, flags)
-    MsgChannel<std::vector<uint8_t>>* fInputQueue; // Pointer to the worker's input queue
+    MsgChannel<BackchannelFrame>* fInputQueue; // Pointer to the worker's input queue (Updated type)
 
     // State tracking
     Boolean fIsActive; // Are we currently playing/consuming?
@@ -61,6 +78,16 @@ private:
     // --- Thread safety for shared audio output ---
     static std::atomic<bool> gIsAudioOutputBusy; // Shared flag for all instances
     bool fHaveAudioOutputLock;                   // Does this instance hold the lock?
+
+    // --- Audio Data Timeout Timer Members ---
+    unsigned fClientSessionId;                   // Client session ID for logging
+    TaskToken fTimeoutTask;                      // Handle for the audio data timeout timer task
+    // struct timeval fLastDataTime;             // Removed: Not needed with simplified logic
+    static const unsigned kAudioDataTimeoutSeconds = 15; // Timeout in seconds
+
+    // --- Stored Audio Properties ---
+    IMPBackchannelFormat fFormat;                // Determined audio format (from first packet)
+    // const unsigned fFrequency = 8000;         // Removed: Use constants from IMPBackchannel.hpp
 };
 
 #endif // BACKCHANNEL_SINK_FRAMED_SOURCE_HPP
