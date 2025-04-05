@@ -1,5 +1,10 @@
 #include "BackchannelSink.hpp"
-#include <GroupsockHelper.hh> // For closeSocket
+#include "Logger.hpp"
+#include "globals.hpp" // For backchannel_stream
+
+// Live555 Headers
+#include <GroupsockHelper.hh> // For closeSocket if needed, maybe not
+#include <RTPSource.hh>
 #include <vector>
 
 #define MODULE "BackchannelSink"
@@ -9,17 +14,18 @@ BackchannelSink* BackchannelSink::createNew(UsageEnvironment& env, backchannel_s
 }
 
 BackchannelSink::BackchannelSink(UsageEnvironment& env, backchannel_stream* stream_data)
-    : FramedSource(env),
-      fActiveTalker(nullptr), // Initialize active talker to null
-      fSilenceTimeoutTask(nullptr), // Initialize timeout task handle
-      fSilenceTimeoutMs(500), // Default silence timeout (e.g., 500ms) - TODO: Make configurable?
+    : MediaSink(env), // Call base class constructor
+      fRTPSource(nullptr),
       fStream(stream_data),
       fInputQueue(nullptr),
-      fIsCurrentlyGettingFrames(false)
+      fIsActive(False),
+      fAfterFunc(nullptr),
+      fAfterClientData(nullptr)
 {
+    LOG_DEBUG("BackchannelSink created (as MediaSink)");
     if (fStream == nullptr) {
          LOG_ERROR("backchannel_stream provided to BackchannelSink is null!");
-         // Handle error
+         // Handle error - maybe assert?
     } else {
         fInputQueue = fStream->inputQueue.get();
         if (fInputQueue == nullptr) {
@@ -27,247 +33,165 @@ BackchannelSink::BackchannelSink(UsageEnvironment& env, backchannel_stream* stre
              // Handle error
         }
     }
-    fClientReceiveBuffer = new u_int8_t[kClientReceiveBufferSize];
-    if (fClientReceiveBuffer == nullptr) {
-        LOG_ERROR("Failed to allocate client receive buffer");
+    fReceiveBuffer = new u_int8_t[kReceiveBufferSize];
+    if (fReceiveBuffer == nullptr) {
+        LOG_ERROR("Failed to allocate receive buffer");
         // Consider throwing an exception or handling error more robustly
     }
 }
 
 BackchannelSink::~BackchannelSink() {
-    // Cancel any pending silence timeout task
-    envir().taskScheduler().unscheduleDelayedTask(fSilenceTimeoutTask);
-    fSilenceTimeoutTask = nullptr;
-
-    // Clean up contexts and stop sources
-    // Note: removeSource stops getting frames and handles fActiveTalker/timeout cancellation
-    while (!fClientSources.empty()) {
-        FramedSource* source = fClientSources.front();
-        removeSource(source); // Use removeSource for consistent cleanup
-    }
-    fSourceContexts.clear(); // Should be empty now
-
-    delete[] fClientReceiveBuffer;
-    // fInputQueue is managed externally (via fStream)
+    LOG_DEBUG("BackchannelSink destroyed");
+    // Ensure we stop playing if active (should be stopped by StreamState already)
+    stopPlaying();
+    delete[] fReceiveBuffer;
+    // fInputQueue and fStream are managed externally
 }
 
-void BackchannelSink::addSource(FramedSource* newSource) {
-    if (newSource == nullptr) return;
+Boolean BackchannelSink::startPlaying(RTPSource& rtpSource,
+                                      MediaSink::afterPlayingFunc* afterFunc,
+                                      void* afterClientData)
+{
+    if (fIsActive) {
+        LOG_WARN("startPlaying called while already active");
+        return False; // Already playing
+    }
 
-    LOG_INFO("Adding client source");
-
-    // Add to the list
-    fClientSources.push_back(newSource);
-
-    // Create and store context
-    ClientSourceContext* context = new ClientSourceContext{this, newSource};
-    fSourceContexts[newSource] = context;
+    fRTPSource = &rtpSource;
+    fAfterFunc = afterFunc;
+    fAfterClientData = afterClientData;
+    fIsActive = True;
 
     // Increment active session count using fStream (atomically)
+    // Do this *before* starting to get frames
     if (fStream) {
         int previous_count = fStream->active_sessions.fetch_add(1, std::memory_order_relaxed);
-        LOG_INFO("Backchannel session added. Active sessions: " << previous_count + 1);
+        LOG_INFO("Backchannel sink starting. Active sessions: " << previous_count + 1);
     } else {
-        LOG_ERROR("fStream is null in addSource! Cannot increment session count.");
+        LOG_ERROR("fStream is null in startPlaying! Cannot increment session count.");
     }
 
-    // If we are actively processing, start requesting frames from this new source immediately.
-    // If not currently active (fIsCurrentlyGettingFrames is false), doGetNextFrame will handle starting requests later.
-    if (fIsCurrentlyGettingFrames) {
-        LOG_INFO("Sink is active, requesting frames from new source.");
-        newSource->getNextFrame(fClientReceiveBuffer, kClientReceiveBufferSize,
-                                incomingDataHandler, context,
-                                sourceClosureHandler, context);
-    }
+
+    LOG_INFO("BackchannelSink starting to play/consume from RTPSource");
+    // Start the process by requesting the first frame
+    return continuePlaying();
 }
 
-void BackchannelSink::removeSource(FramedSource* sourceToRemove) {
-    if (sourceToRemove == nullptr) return;
+void BackchannelSink::stopPlaying() {
+    if (!fIsActive) {
+        // LOG_DEBUG("stopPlaying called while not active"); // Can be noisy
+        return;
+    }
 
-    LOG_INFO("Removing client source");
+    LOG_INFO("BackchannelSink stopping play/consumption");
+    fIsActive = False;
 
-    // Find and remove from the list
-    fClientSources.remove(sourceToRemove);
+    // Stop the source from delivering frames
+    if (fRTPSource != nullptr) {
+        fRTPSource->stopGettingFrames();
+    }
 
-    // Find and delete the context
-    auto it = fSourceContexts.find(sourceToRemove);
-    if (it != fSourceContexts.end()) {
-        // Stop getting frames *before* deleting context
-        sourceToRemove->stopGettingFrames();
-
-        // Decrement active session count BEFORE deleting context (atomically)
-        if (fStream) {
-            int previous_count = fStream->active_sessions.fetch_sub(1, std::memory_order_relaxed);
-            LOG_INFO("Backchannel session removed. Active sessions: " << previous_count - 1);
-        } else {
-             LOG_ERROR("fStream is null in removeSource! Cannot decrement session count.");
-        }
-
-        delete it->second; // Now delete context
-        fSourceContexts.erase(it);
+    // Decrement active session count (atomically)
+    // Do this *after* stopping frames
+    if (fStream) {
+        int previous_count = fStream->active_sessions.fetch_sub(1, std::memory_order_relaxed);
+        LOG_INFO("Backchannel sink stopped. Active sessions: " << previous_count - 1);
+         // Optional: Add logic here if previous_count was 1 (last session ended)
     } else {
-        LOG_WARN("Attempted to remove source not in context map");
-        // Still try to stop it if it might be active
-        sourceToRemove->stopGettingFrames();
+         LOG_ERROR("fStream is null in stopPlaying! Cannot decrement session count.");
     }
 
-    // If the removed source was the active talker, clear the active talker and cancel timeout
-    if (sourceToRemove == fActiveTalker) {
-        LOG_INFO("Removed source was the active talker. Clearing active talker.");
-        fActiveTalker = nullptr;
-        envir().taskScheduler().unscheduleDelayedTask(fSilenceTimeoutTask);
-        fSilenceTimeoutTask = nullptr;
+
+    // Call the afterPlaying function if specified (though usually null for sinks)
+    if (fAfterFunc != nullptr) {
+        (*fAfterFunc)(fAfterClientData);
     }
+
+    // Clear pointers after stopping
+    fRTPSource = nullptr;
+    fAfterFunc = nullptr;
+    fAfterClientData = nullptr;
 }
 
-// Static callback wrapper for incoming frames from clients
-void BackchannelSink::incomingDataHandler(void* clientData, unsigned frameSize,
-                                                  unsigned numTruncatedBytes,
-                                                  struct timeval presentationTime,
-                                                  unsigned durationInMicroseconds) {
-    ClientSourceContext* context = static_cast<ClientSourceContext*>(clientData);
-    if (context && context->sink) {
-        context->sink->handleIncomingData(context, frameSize, numTruncatedBytes);
-    } else {
-         LOG_ERROR("Invalid context in incomingDataHandler");
+
+// Called by Live555 when the source has data or closes
+Boolean BackchannelSink::continuePlaying() {
+    if (!fIsActive || fRTPSource == nullptr) {
+        return False; // Not active or source detached
     }
+
+    // Request the next frame from the source
+    fRTPSource->getNextFrame(fReceiveBuffer, kReceiveBufferSize,
+                             afterGettingFrame, this,
+                             onSourceClosure, this); // Use static wrappers
+
+    return True; // Indicate we want to continue
 }
 
-// Per-instance handler for incoming frames from clients - "First Talker Wins" logic
-void BackchannelSink::handleIncomingData(ClientSourceContext* context, unsigned frameSize, unsigned numTruncatedBytes) {
-    FramedSource* currentSource = context->source;
-    bool processThisPacket = false;
-
-    // --- First Talker Wins Logic ---
-    if (fActiveTalker == nullptr) {
-        // Line is free, this source becomes the active talker
-        fActiveTalker = currentSource;
-        LOG_DEBUG("New active talker");
-        processThisPacket = true;
-    } else if (fActiveTalker == currentSource) {
-        // The current active talker continues
-        processThisPacket = true;
-    } else {
-        // Another source tried to talk while the line was busy
-        // LOG_DEBUG("Ignoring frame from non-active source: " << currentSource);
-        processThisPacket = false;
-    }
-
-    // If this source is allowed to talk (or just became the talker)
-    if (processThisPacket) {
-        // Reset/schedule the silence timeout
-        envir().taskScheduler().unscheduleDelayedTask(fSilenceTimeoutTask);
-        fSilenceTimeoutTask = envir().taskScheduler().scheduleDelayedTask(
-            fSilenceTimeoutMs * 1000, // Convert ms to microseconds
-            (TaskFunc*)silenceTimeoutHandler, this);
-
-        // Process the actual packet data
-        if (numTruncatedBytes > 0) {
-            LOG_WARN("Active talker sent truncated frame (" << frameSize << " bytes, " << numTruncatedBytes << " truncated). Discarding.");
-        } else if (frameSize == 0) {
-             LOG_DEBUG("Active talker sent zero-sized frame. Ignoring.");
-        } else {
-            // Valid frame received from the active talker
-            if (fInputQueue) {
-                std::vector<uint8_t> rtpPacket(fClientReceiveBuffer, fClientReceiveBuffer + frameSize);
-                if (!fInputQueue->write(std::move(rtpPacket))) {
-                     LOG_WARN("Backchannel input queue was full. Oldest packet dropped.");
-                }
-            } else {
-                 LOG_ERROR("Input queue is null, cannot queue packet!");
-            }
-        }
-    }
-
-    // Always request the next frame from the source that just delivered,
-    // regardless of whether it was the active talker or not.
-    // This ensures we keep listening to all connected clients.
-    if (fIsCurrentlyGettingFrames) {
-        currentSource->getNextFrame(fClientReceiveBuffer, kClientReceiveBufferSize,
-                                    incomingDataHandler, context,
-                                    sourceClosureHandler, context);
-    }
-}
-
-// Static callback for silence timeout
-void BackchannelSink::silenceTimeoutHandler(void* clientData) {
+// Static callback wrapper for incoming frames from the RTPSource
+void BackchannelSink::afterGettingFrame(void* clientData, unsigned frameSize,
+                                        unsigned numTruncatedBytes,
+                                        struct timeval presentationTime,
+                                        unsigned /*durationInMicroseconds*/) // Duration often 0 for RTP
+{
     BackchannelSink* sink = static_cast<BackchannelSink*>(clientData);
-    if (sink) {
-        LOG_DEBUG("Silence timeout reached. Clearing active talker.");
-        sink->fActiveTalker = nullptr;
-        sink->fSilenceTimeoutTask = nullptr; // Mark task as complete
+    if (sink != nullptr) {
+        sink->afterGettingFrame1(frameSize, numTruncatedBytes, presentationTime);
+    } else {
+        LOG_ERROR("afterGettingFrame called with invalid clientData");
     }
 }
 
-
-// Static callback for client source closure
-void BackchannelSink::sourceClosureHandler(void* clientData) {
-     ClientSourceContext* context = static_cast<ClientSourceContext*>(clientData);
-     if (context && context->sink && context->source) {
-         LOG_INFO("Source closure detected");
-         // Use scheduler to avoid issues if called during source destruction
-         context->sink->envir().taskScheduler().scheduleDelayedTask(0,
-             (TaskFunc*)[](void* cd) {
-                 ClientSourceContext* ctx = static_cast<ClientSourceContext*>(cd);
-                 if (ctx && ctx->sink) {
-                    ctx->sink->handleSourceClosure(ctx->source);
-                 }
-             },
-             context);
-     } else {
-         LOG_ERROR("Invalid context in sourceClosureHandler");
-     }
-}
-
-// Per-instance handler for source closure
-void BackchannelSink::handleSourceClosure(FramedSource* source) {
-     LOG_DEBUG("Handling source closure");
-     // Remove the source, which handles list removal, context deletion,
-     // and clearing fActiveTalker/timeout if necessary.
-     removeSource(source);
-}
-
-
-// --- Methods related to downstream delivery (FramedSource overrides) ---
-
-// Called by Live555 when the downstream component (subsession) wants data.
-// We use this to signal that we should start requesting frames from clients.
-void BackchannelSink::doGetNextFrame() {
-    if (!fIsCurrentlyGettingFrames) {
-         LOG_INFO("doGetNextFrame: Starting frame requests from all client sources.");
-         fIsCurrentlyGettingFrames = true;
-         // Request frames from all currently connected sources
-         for (FramedSource* source : fClientSources) {
-             auto it = fSourceContexts.find(source);
-             if (it != fSourceContexts.end()) {
-                 source->getNextFrame(fClientReceiveBuffer, kClientReceiveBufferSize,
-                                      incomingDataHandler, it->second,
-                                      sourceClosureHandler, it->second);
-             } else {
-                  LOG_ERROR("Source has no context in doGetNextFrame!");
-             }
-         }
+// Per-instance handler for incoming frames
+void BackchannelSink::afterGettingFrame1(unsigned frameSize, unsigned numTruncatedBytes,
+                                         struct timeval /*presentationTime*/)
+{
+    if (!fIsActive) {
+        // LOG_DEBUG("Frame received but sink is no longer active");
+        return; // No longer playing
     }
-    // Note: We don't actually deliver frames *downstream* via deliverFrameData,
-    // as this sink's purpose is to *receive* and queue data for the processor thread.
+
+    // Process the received frame
+    if (numTruncatedBytes > 0) {
+        LOG_WARN("Received truncated frame (" << frameSize << " bytes, " << numTruncatedBytes << " truncated). Discarding.");
+    } else if (frameSize == 0) {
+        // LOG_DEBUG("Received zero-sized frame. Ignoring."); // Can be noisy
+    } else {
+        // Valid frame received
+        // LOG_DEBUG("Received frame of size " << frameSize); // Can be very noisy
+        if (fInputQueue) {
+            // Copy data to a vector and queue it
+            std::vector<uint8_t> rtpPacket(fReceiveBuffer, fReceiveBuffer + frameSize);
+            if (!fInputQueue->write(std::move(rtpPacket))) {
+                 LOG_WARN("Backchannel input queue was full. Oldest packet dropped.");
+            }
+        } else {
+             LOG_ERROR("Input queue is null, cannot queue packet!");
+        }
+    }
+
+    // Immediately request the next frame to keep the data flowing
+    if (fIsActive) {
+        continuePlaying();
+    }
 }
 
-// Called when the downstream component stops asking for frames.
-void BackchannelSink::doStopGettingFrames() {
-    LOG_INFO("doStopGettingFrames called");
-    if (fIsCurrentlyGettingFrames) {
-        fIsCurrentlyGettingFrames = false;
-        // Stop asking all client sources for frames
-        LOG_DEBUG("Stopping frame requests from all client sources.");
-        for (FramedSource* source : fClientSources) {
-            source->stopGettingFrames();
-        }
-        // Also clear the active talker and cancel timeout as we are stopping
-        if (fActiveTalker) {
-            LOG_DEBUG("Clearing active talker due to stopGettingFrames.");
-            fActiveTalker = nullptr;
-            envir().taskScheduler().unscheduleDelayedTask(fSilenceTimeoutTask);
-            fSilenceTimeoutTask = nullptr;
-        }
+// Static callback for source closure (called by Live555 via getNextFrame)
+void MediaSink::onSourceClosure(void* clientData) {
+    BackchannelSink* sink = static_cast<BackchannelSink*>(clientData);
+    if (sink != nullptr) {
+        LOG_INFO("Source closure detected by BackchannelSink");
+        // The source has closed (e.g., client disconnected sending RTCP BYE)
+        // We should stop playing, which will also call the afterPlaying function if set.
+        // Note: Don't call stopPlaying directly from here if it might delete the sink
+        //       or cause re-entrancy issues. Schedule it instead.
+        sink->envir().taskScheduler().scheduleDelayedTask(0,
+            (TaskFunc*)[](void* cd) {
+                BackchannelSink* s = static_cast<BackchannelSink*>(cd);
+                if (s) s->stopPlaying();
+            },
+            sink);
+    } else {
+         LOG_ERROR("onSourceClosure called with invalid clientData");
     }
 }

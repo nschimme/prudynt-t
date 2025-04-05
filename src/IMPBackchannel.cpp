@@ -100,23 +100,20 @@ BackchannelServerMediaSubsession* IMPBackchannel::createNewSubsession(UsageEnvir
     if (!global_backchannel) {
          LOG_ERROR("global_backchannel not initialized!");
          return nullptr;
-    }
+     }
 
-    // Create the Sink (which is also a FramedSource), passing the backchannel_stream pointer
-    BackchannelSink* sink = BackchannelSink::createNew(env, global_backchannel.get());
-    if (!sink) {
-        LOG_ERROR("Failed to create BackchannelSink!");
-        return nullptr;
-    }
+     // Sink is now created internally by BackchannelServerMediaSubsession::getStreamParameters
+     // via createNewStreamDestination. We just need to create the subsession itself,
+     // passing the necessary stream data pointer.
 
-    // Create the subsession, passing it the Sink
-    BackchannelServerMediaSubsession* subsession = BackchannelServerMediaSubsession::createNew(env, sink);
-    if (!subsession) {
-        LOG_ERROR("Failed to create BackchannelServerMediaSubsession!");
-        Medium::close(sink); // Clean up the created sink
-        return nullptr;
-    }
+     // Create the subsession, passing the stream data pointer
+     BackchannelServerMediaSubsession* subsession = BackchannelServerMediaSubsession::createNew(env, global_backchannel.get());
+     if (!subsession) {
+         LOG_ERROR("Failed to create BackchannelServerMediaSubsession!");
+         // No sink to clean up here anymore
+         return nullptr;
+     }
 
-    LOG_INFO("Backchannel subsession and sink created successfully.");
+     LOG_INFO("Backchannel subsession created successfully."); // Updated log message slightly
     return subsession;
 }

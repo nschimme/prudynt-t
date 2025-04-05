@@ -12,61 +12,50 @@
 #include "MsgChannel.hpp" // Include MsgChannel definition
 #include "globals.hpp"    // Include globals to get backchannel_stream definition
 
-// Renamed class, still inherits FramedSource as it acts as the source for the subsession
-class BackchannelSink : public FramedSource {
+// Forward declarations
+class RTPSource; // The source we will consume from
+
+// Inherits from MediaSink as it consumes data from an RTPSource
+class BackchannelSink : public MediaSink {
 public:
-    // Constructor now takes the backchannel_stream pointer
     static BackchannelSink* createNew(UsageEnvironment& env, backchannel_stream* stream_data);
 
-    // Methods to manage client sources
-    virtual void addSource(FramedSource* source);
-    virtual void removeSource(FramedSource* source);
+    // Method to start consuming from the source
+    Boolean startPlaying(RTPSource& rtpSource,
+                         MediaSink::afterPlayingFunc* afterFunc,
+                         void* afterClientData);
+    // Method to stop consuming (called by StreamState destructor)
+    void stopPlaying();
+
 
 protected:
-    BackchannelSink(UsageEnvironment& env, backchannel_stream* stream_data); // Updated constructor
+    BackchannelSink(UsageEnvironment& env, backchannel_stream* stream_data);
     virtual ~BackchannelSink();
 
+    // --- Required virtual methods from MediaSink ---
+    virtual Boolean continuePlaying(); // Called when source has data
+
 private:
-    // Helper struct for client source callbacks
-    struct ClientSourceContext {
-        BackchannelSink* sink; // Renamed from selector
-        FramedSource* source;
-    };
+    // Static callback wrapper for incoming frames from the RTPSource
+    static void afterGettingFrame(void* clientData, unsigned frameSize,
+                                  unsigned numTruncatedBytes,
+                                  struct timeval presentationTime,
+                                  unsigned durationInMicroseconds);
+    // Per-instance handler
+    void afterGettingFrame1(unsigned frameSize, unsigned numTruncatedBytes,
+                            struct timeval presentationTime);
 
-    // Static callback wrapper for frames coming *from* client sources (remains same)
-    static void incomingDataHandler(void* clientData, unsigned frameSize,
-                                    unsigned numTruncatedBytes,
-                                    struct timeval presentationTime,
-                                    unsigned durationInMicroseconds);
-    // Per-instance handler for frames coming *from* client sources (updated signature)
-    void handleIncomingData(ClientSourceContext* context, unsigned frameSize, unsigned numTruncatedBytes);
-
-    // Static callback for client source closure (remains same)
-    static void sourceClosureHandler(void* clientData);
-    void handleSourceClosure(FramedSource* source);
-
-    // Static callback for silence timeout
-    static void silenceTimeoutHandler(void* clientData);
-
-
-    // Overridden virtual methods for FramedSource (These might become NO-OPs or simplified)
-    virtual void doGetNextFrame(); // This source doesn't produce frames for Live555 pipeline
-    virtual void doStopGettingFrames(); // Needs to stop requesting from clients
-
-    // --- Members for managing client sources ---
-    FramedSource* fActiveTalker; // Tracks the source currently allowed to send
-    TaskToken fSilenceTimeoutTask; // Handle for the silence timeout task
-    unsigned fSilenceTimeoutMs; // Duration for silence timeout in ms (e.g., 500)
-    std::list<FramedSource*> fClientSources; // Keep track of all connected client sources
-    std::map<FramedSource*, ClientSourceContext*> fSourceContexts; // Map sources to their callback contexts
-
-    // --- Members for receiving data and queuing ---
-    u_int8_t* fClientReceiveBuffer; // Buffer to receive data *from* clients
-    static const unsigned kClientReceiveBufferSize = 2048; // Max expected RTP packet size? Adjust as needed.
+    // --- Members ---
+    RTPSource* fRTPSource; // The source providing data
+    u_int8_t* fReceiveBuffer; // Buffer to receive data
+    static const unsigned kReceiveBufferSize = 2048; // Adjust as needed
     backchannel_stream* fStream; // Pointer to the shared stream state (queue, flags)
-    MsgChannel<std::vector<uint8_t>>* fInputQueue; // Pointer to the worker's input queue (convenience, points into fStream)
+    MsgChannel<std::vector<uint8_t>>* fInputQueue; // Pointer to the worker's input queue
 
-    bool fIsCurrentlyGettingFrames; // Track if we should be actively getting frames from clients
+    // State tracking
+    Boolean fIsActive; // Are we currently playing/consuming?
+    MediaSink::afterPlayingFunc* fAfterFunc; // Callback when source stops
+    void* fAfterClientData; // Client data for the callback
 };
 
 #endif // BACKCHANNEL_SINK_FRAMED_SOURCE_HPP
