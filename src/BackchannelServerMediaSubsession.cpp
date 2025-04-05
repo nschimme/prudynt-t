@@ -250,10 +250,12 @@ void BackchannelServerMediaSubsession::getStreamParameters(unsigned clientSessio
                  // SimpleRTPSource might still require a valid Groupsock object even if not used for UDP.
                  struct sockaddr_storage dummyAddr; memset(&dummyAddr, 0, sizeof dummyAddr); dummyAddr.ss_family = AF_INET; // Use AF_INET or AF_INET6
                  Port dummyPort(0);
-                 rtpGroupsock = new Groupsock(envir(), dummyAddr, dummyPort, 0); // Create dummy
-                 LOG_WARN(">>> getStreamParameters: Created dummy Groupsock (" << (int)rtpGroupsock << ") for TCP mode.");
-                 // We'll need to ensure this dummy groupsock is deleted later in BackchannelStreamState destructor if created.
-                 // For now, rtcpGroupsock remains null for TCP.
+                 rtpGroupsock = new Groupsock(envir(), dummyAddr, dummyPort, 0); // Create dummy RTP groupsock
+                 // --- Create a dummy RTCP groupsock for TCP mode as well ---
+                 // RTCPInstance::createNew seems to require a valid groupsock even if not used for UDP RTCP.
+                 rtcpGroupsock = new Groupsock(envir(), dummyAddr, dummyPort, 0); // Create dummy RTCP groupsock
+                 LOG_WARN(">>> getStreamParameters: Created dummy RTP Groupsock (" << (int)rtpGroupsock << ") and dummy RTCP Groupsock (" << (int)rtcpGroupsock << ") for TCP mode.");
+                 // BackchannelStreamState destructor needs to handle deleting both potentially dummy groupsocks.
             }
 
             // Create the RTPSource (our specific implementation)
