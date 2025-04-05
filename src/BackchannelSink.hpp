@@ -17,7 +17,7 @@
 // #include "globals.hpp" // Removed include
 
 // Forward declarations
-class RTPSource; // The source we will consume from
+class FramedSource; // Use FramedSource instead of RTPSource
 class TaskScheduler; // For TaskToken
 struct backchannel_stream; // Forward declaration
 struct BackchannelFrame;   // Forward declaration
@@ -29,8 +29,8 @@ public:
     static BackchannelSink* createNew(UsageEnvironment& env, backchannel_stream* stream_data,
                                       unsigned clientSessionId);
 
-    // Method to start consuming from the source
-    Boolean startPlaying(RTPSource& rtpSource,
+    // Method to start consuming from the source (now takes FramedSource)
+    Boolean startPlaying(FramedSource& source,
                          MediaSink::afterPlayingFunc* afterFunc,
                          void* afterClientData);
     // Method to stop consuming (called by StreamState destructor)
@@ -63,8 +63,13 @@ private:
     void afterGettingFrame1(unsigned frameSize, unsigned numTruncatedBytes,
                             struct timeval presentationTime);
 
+    // Static callback wrapper for source closure
+    static void staticOnSourceClosure(void* clientData);
+    // Per-instance handler for source closure
+    void onSourceClosure1();
+
     // --- Members ---
-    RTPSource* fRTPSource; // The source providing data
+    FramedSource* fRTPSource; // Changed type to FramedSource* (keeping name for now)
     u_int8_t* fReceiveBuffer; // Buffer to receive data
     static const unsigned kReceiveBufferSize = 2048; // Adjust as needed
     backchannel_stream* fStream; // Pointer to the shared stream state (queue, flags)

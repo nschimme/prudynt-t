@@ -9,6 +9,8 @@
 #include <cmath>           // For std::round
 #include <cstdint>         // For INT16_MAX, INT16_MIN
 #include <cassert>         // For assert
+#include <fcntl.h>         // For fcntl, O_NONBLOCK
+#include <unistd.h>        // For write(), fileno()
 #include "globals.hpp"     // For cfg access
 
 #define MODULE "BackchannelProcessor"
@@ -23,7 +25,7 @@ IMPAudioPalyloadType BackchannelProcessor::mapFormatToImpPayloadType(IMPBackchan
 }
 
 BackchannelProcessor::BackchannelProcessor(backchannel_stream* stream_data)
-    : fStream(stream_data), fPipe(nullptr)
+    : fStream(stream_data), fPipe(nullptr), fPipeFd(-1), fLastPipeFullLogTime(std::chrono::steady_clock::time_point::min())
 {
     if (fStream == nullptr) {
         LOG_ERROR("backchannel_stream data provided to BackchannelProcessor is null!");
@@ -84,29 +86,53 @@ std::vector<int16_t> BackchannelProcessor::resampleLinear(const std::vector<int1
 }
 
 
-// Opens the pipe to the external process
+// Opens the pipe to the external process and sets it to non-blocking
 bool BackchannelProcessor::initPipe() {
-     if (fPipe) {
-         LOG_WARN("Pipe already initialized.");
-         return true;
-     }
-     LOG_INFO("Opening pipe to: /bin/iac -s");
-     fPipe = popen("/bin/iac -s", "w");
-     if (fPipe == nullptr) {
-         LOG_ERROR("popen failed: " << strerror(errno));
-         return false;
-     }
-     LOG_INFO("Pipe opened successfully.");
-     return true;
+    if (fPipe) {
+        LOG_WARN("Pipe already initialized.");
+        return true;
+    }
+    LOG_INFO("Opening pipe to: /bin/iac -s");
+    fPipe = popen("/bin/iac -s", "w");
+    if (fPipe == nullptr) {
+        LOG_ERROR("popen failed: " << strerror(errno));
+        fPipeFd = -1;
+        return false;
+    }
+
+    // Get file descriptor and set to non-blocking
+    fPipeFd = fileno(fPipe);
+    if (fPipeFd == -1) {
+        LOG_ERROR("fileno failed: " << strerror(errno));
+        closePipe(); // Close the popen stream if fileno failed
+        return false;
+    }
+
+    int flags = fcntl(fPipeFd, F_GETFL, 0);
+    if (flags == -1) {
+        LOG_ERROR("fcntl(F_GETFL) failed: " << strerror(errno));
+        closePipe();
+        return false;
+    }
+
+    if (fcntl(fPipeFd, F_SETFL, flags | O_NONBLOCK) == -1) {
+        LOG_ERROR("fcntl(F_SETFL, O_NONBLOCK) failed: " << strerror(errno));
+        closePipe();
+        return false;
+    }
+
+    LOG_INFO("Pipe opened successfully and set to non-blocking (fd=" << fPipeFd << ").");
+    return true;
 }
 
 // Closes the pipe if it's open
 void BackchannelProcessor::closePipe() {
     if (fPipe) {
-        LOG_INFO("Closing pipe.");
+        LOG_INFO("Closing pipe (fd=" << fPipeFd << ").");
         int ret = pclose(fPipe);
         fPipe = nullptr;
-         if (ret == -1) {
+        fPipeFd = -1; // Reset file descriptor
+        if (ret == -1) {
             LOG_ERROR("pclose() failed: " << strerror(errno));
         } else {
              if (WIFEXITED(ret)) {
@@ -237,10 +263,10 @@ bool BackchannelProcessor::decodeFrame(const uint8_t* payload, size_t payloadSiz
     return false; // Indicate failure
 }
 
-// Writes PCM data to the pipe
+// Writes PCM data to the non-blocking pipe
 bool BackchannelProcessor::writePcmToPipe(const std::vector<int16_t>& pcmBuffer) {
-    if (fPipe == nullptr) {
-        LOG_ERROR("Pipe is closed, cannot write PCM data.");
+    if (fPipeFd == -1 || fPipe == nullptr) { // Check fd as well
+        LOG_ERROR("Pipe is closed (fd=" << fPipeFd << "), cannot write PCM data.");
         return false; // Indicate pipe error
     }
     if (pcmBuffer.empty()) {
@@ -249,18 +275,47 @@ bool BackchannelProcessor::writePcmToPipe(const std::vector<int16_t>& pcmBuffer)
     }
 
     size_t bytesToWrite = pcmBuffer.size() * sizeof(int16_t);
-    size_t bytesWritten = fwrite(pcmBuffer.data(), 1, bytesToWrite, fPipe);
+    const uint8_t* dataPtr = reinterpret_cast<const uint8_t*>(pcmBuffer.data());
+    // size_t totalBytesWritten = 0; // Removed as it's unused with single write attempt
 
-    if (bytesWritten < bytesToWrite) {
-        int stream_error = ferror(fPipe);
-        int stream_eof = feof(fPipe);
-        int saved_errno = errno;
-        LOG_ERROR("fwrite to pipe failed (EOF=" << stream_eof << ", ERR=" << stream_error << ", errno=" << saved_errno << ": " << strerror(saved_errno) << "). Assuming pipe closed.");
-        closePipe(); // Close the pipe immediately on error
-        return false; // Indicate pipe error
+    // Loop in case write returns partial success, though less likely with pipes
+    // In non-blocking mode, write usually writes all it can or fails with EAGAIN.
+    // A simple single write attempt is often sufficient.
+    ssize_t bytesWritten = write(fPipeFd, dataPtr, bytesToWrite);
+
+    if (bytesWritten == static_cast<ssize_t>(bytesToWrite)) {
+        // Success
+    } else if (bytesWritten >= 0) {
+        // Partial write - unusual for pipe, treat as error/clogged for simplicity?
+        // Or attempt to write remaining? For now, log and treat as clogged.
+        LOG_WARN("Partial write to pipe (" << bytesWritten << "/" << bytesToWrite << "). Assuming pipe clogged.");
+        // Consider if partial data should be discarded or retried. Discarding for now.
+        return true; // Indicate non-fatal, continue processing
     }
-    // Optional: fflush(fPipe); // Consider if immediate flushing is needed
+    else { // bytesWritten == -1
+        int saved_errno = errno;
+        if (saved_errno == EAGAIN || saved_errno == EWOULDBLOCK) {
+            // Pipe buffer is full, discard data and continue processing
+            auto now = std::chrono::steady_clock::now();
+            if (now - fLastPipeFullLogTime > std::chrono::seconds(5)) { // Rate-limit logging
+                LOG_WARN("Backchannel pipe clogged (EAGAIN/EWOULDBLOCK). Discarding PCM chunk."); // Use "clogged" terminology
+                fLastPipeFullLogTime = now;
+            }
+            return true; // Indicate success (non-fatal, continue processing)
+        } else if (saved_errno == EPIPE) {
+            // Pipe closed by reader
+            LOG_ERROR("write() failed: Broken pipe (EPIPE). Assuming pipe closed by reader.");
+            closePipe();
+            return false; // Indicate pipe error
+        } else {
+            // Other write error
+            LOG_ERROR("write() failed: errno=" << saved_errno << ": " << strerror(saved_errno) << ". Assuming pipe closed.");
+            closePipe();
+            return false; // Indicate pipe error
+        }
+    }
 
+    // Optional: Consider if fsync(fPipeFd) is needed, though usually not for pipes.
     return true; // Success
 }
 

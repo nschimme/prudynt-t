@@ -10,33 +10,10 @@
 #include <vector>
 #include <atomic> // Include atomic header
 #include <arpa/inet.h> // For ntohl
+#include <sstream>     // For logging hex bytes
+#include <iomanip>     // For setfill, setw
 
 #define MODULE "BackchannelSink"
-
-// Basic RTP header structure (RFC 3550)
-typedef struct {
-#if __BYTE_ORDER == __BIG_ENDIAN
-    unsigned int version:2;   /* protocol version */
-    unsigned int p:1;         /* padding flag */
-    unsigned int x:1;         /* header extension flag */
-    unsigned int cc:4;        /* CSRC count */
-    unsigned int m:1;         /* marker bit */
-    unsigned int pt:7;        /* payload type */
-#elif __BYTE_ORDER == __LITTLE_ENDIAN
-    unsigned int cc:4;        /* CSRC count */
-    unsigned int x:1;         /* header extension flag */
-    unsigned int p:1;         /* padding flag */
-    unsigned int version:2;   /* protocol version */
-    unsigned int pt:7;        /* payload type */
-    unsigned int m:1;         /* marker bit */
-#else
-#error "Define byte order for your platform"
-#endif
-    unsigned int seq:16;      /* sequence number */
-    uint32_t ts;              /* timestamp */
-    uint32_t ssrc;            /* synchronization source */
-    // uint32_t csrc[1];      /* optional CSRC list */ // We assume cc=0 for simplicity
-} rtp_hdr_t;
 
 const unsigned RTP_HEADER_SIZE = 12; // Base RTP header size without CSRCs
 
@@ -95,7 +72,7 @@ BackchannelSink::~BackchannelSink() {
     // fInputQueue and fStream are managed externally
 }
 
-Boolean BackchannelSink::startPlaying(RTPSource& rtpSource,
+Boolean BackchannelSink::startPlaying(FramedSource& source, // Changed parameter type
                                       MediaSink::afterPlayingFunc* afterFunc,
                                       void* afterClientData)
 {
@@ -106,7 +83,7 @@ Boolean BackchannelSink::startPlaying(RTPSource& rtpSource,
         return False;
     }
 
-    fRTPSource = &rtpSource;
+    fRTPSource = &source; // Changed assignment
     fAfterFunc = afterFunc;
     fAfterClientData = afterClientData;
     fHaveAudioOutputLock = false; // Ensure lock is initially not held
@@ -192,7 +169,7 @@ Boolean BackchannelSink::continuePlaying() {
     // Request the next frame from the source
     fRTPSource->getNextFrame(fReceiveBuffer, kReceiveBufferSize,
                              afterGettingFrame, this,
-                             onSourceClosure, this); // Use static wrappers
+                             staticOnSourceClosure, this); // Use static wrappers (Changed here)
 
     return True; // Indicate we want to continue
 }
@@ -216,6 +193,9 @@ void BackchannelSink::afterGettingFrame(void* clientData, unsigned frameSize,
 void BackchannelSink::afterGettingFrame1(unsigned frameSize, unsigned numTruncatedBytes,
                                          struct timeval presentationTime) // Removed unused variable marker
 {
+    // Log the frame size received by the sink
+    LOG_DEBUG("Sink::afterGettingFrame1: Received frameSize=" << frameSize << ", numTruncatedBytes=" << numTruncatedBytes << " for session " << fClientSessionId);
+
     if (!fIsActive) {
         // LOG_DEBUG("Frame received but sink is no longer active for session " << fClientSessionId); // Added session ID
         return; // No longer playing
@@ -250,12 +230,52 @@ void BackchannelSink::afterGettingFrame1(unsigned frameSize, unsigned numTruncat
     } else if (frameSize < RTP_HEADER_SIZE) { // Check if frame is large enough for RTP header
         LOG_WARN("Received frame smaller than RTP header (" << frameSize << " bytes) for session " << fClientSessionId << ". Discarding.");
     } else if (frameSize > 0) {
-        // Valid frame received, parse RTP header and create BackchannelFrame
-        rtp_hdr_t* rtp_header = (rtp_hdr_t*)fReceiveBuffer;
+        // --- Add Header Logging ---
+        std::stringstream ss;
+        ss << "Received frame (" << frameSize << " bytes) for session " << fClientSessionId << ". Header bytes: ";
+        // Log first 4 bytes (or fewer if frameSize is smaller)
+        unsigned bytesToLog = std::min((unsigned)4, frameSize);
+        for (unsigned i = 0; i < bytesToLog; ++i) {
+            ss << std::hex << std::setw(2) << std::setfill('0') << (int)fReceiveBuffer[i] << " ";
+         }
+         LOG_DEBUG(ss.str());
+
+         // --- Check for Invalid Header ---
+         if (bytesToLog >= 2 && fReceiveBuffer[0] == 0xFF && fReceiveBuffer[1] == 0xFF) {
+             LOG_ERROR("Detected invalid RTP header starting with FF FF for session " << fClientSessionId << ". Stopping sink.");
+             // Schedule stopPlaying to avoid potential re-entrancy issues
+             envir().taskScheduler().scheduleDelayedTask(0,
+                 (TaskFunc*)[](void* cd) {
+                     BackchannelSink* s = static_cast<BackchannelSink*>(cd);
+                     if (s) s->stopPlaying();
+                 },
+                 this);
+             return; // Stop processing this frame and further frames
+         }
+         // --- End Invalid Header Check ---
+
+         // Valid frame received, manually parse RTP header and create BackchannelFrame
+
+         // --- Add Full Frame Logging ---
+         std::stringstream ss_full;
+         ss_full << "Full frame data (" << frameSize << " bytes): ";
+         // Limit logging for very large frames if necessary, e.g., first 100 bytes
+         unsigned fullBytesToLog = std::min((unsigned)100, frameSize);
+         for (unsigned i = 0; i < fullBytesToLog; ++i) {
+             ss_full << std::hex << std::setw(2) << std::setfill('0') << (int)fReceiveBuffer[i] << " ";
+         }
+         if (frameSize > fullBytesToLog) {
+             ss_full << "...";
+         }
+         LOG_DEBUG(ss_full.str());
+         // --- End Full Frame Logging ---
+
+        // Manually extract Payload Type (PT) from the second byte (index 1)
+        // PT is the lower 7 bits of the second byte.
+        unsigned char payloadType = fReceiveBuffer[1] & 0x7F;
 
         // Determine format from payload type on the first valid packet
         if (fFormat == IMPBackchannelFormat::UNKNOWN) {
-            unsigned char payloadType = rtp_header->pt;
             // Use helper function to map RTP PT to our enum
             fFormat = IMPBackchannel::formatFromRtpPayloadType(payloadType);
 
@@ -269,7 +289,10 @@ void BackchannelSink::afterGettingFrame1(unsigned frameSize, unsigned numTruncat
             LOG_INFO("Determined backchannel format for session " << fClientSessionId << " as " << static_cast<int>(fFormat) << " (PT=" << (int)payloadType << ")");
         }
 
-        uint32_t rtpTimestamp = ntohl(rtp_header->ts); // Convert from network byte order
+        // Optionally extract other RTP header fields manually if needed (e.g., timestamp)
+        // uint32_t rtpTimestampNetworkOrder;
+        // memcpy(&rtpTimestampNetworkOrder, fReceiveBuffer + 4, sizeof(uint32_t));
+        // uint32_t rtpTimestamp = ntohl(rtpTimestampNetworkOrder); // Convert from network byte order
 
         // Calculate presentation time based on RTP timestamp and frequency
         // Note: presentationTime passed to this function is from Live555's internal clock,
@@ -366,23 +389,28 @@ void BackchannelSink::timeoutCheck1() {
 // --- End Audio Data Timeout Timer Logic ---
 
 
-// Static callback for source closure (called by Live555 via getNextFrame)
-void MediaSink::onSourceClosure(void* clientData) {
+// Static callback wrapper for source closure (called by Live555 via getNextFrame)
+void BackchannelSink::staticOnSourceClosure(void* clientData) {
     BackchannelSink* sink = static_cast<BackchannelSink*>(clientData);
     if (sink != nullptr) {
-        // Use the getter function to access the client session ID
-        LOG_INFO("Source closure detected by BackchannelSink for session " << sink->getClientSessionId());
-        // The source has closed (e.g., client disconnected sending RTCP BYE)
-        // We should stop playing, which will also call the afterPlaying function if set.
-        // Note: Don't call stopPlaying directly from here if it might delete the sink
-        //       or cause re-entrancy issues. Schedule it instead.
-        sink->envir().taskScheduler().scheduleDelayedTask(0,
-            (TaskFunc*)[](void* cd) {
-                BackchannelSink* s = static_cast<BackchannelSink*>(cd);
-                if (s) s->stopPlaying(); // stopPlaying now handles timer cancellation and lock release
-            },
-            sink);
+        sink->onSourceClosure1(); // Call the instance method
     } else {
-         LOG_ERROR("onSourceClosure called with invalid clientData");
+         LOG_ERROR("staticOnSourceClosure called with invalid clientData");
     }
+}
+
+// Per-instance handler for source closure
+void BackchannelSink::onSourceClosure1() {
+    // Use the getter function to access the client session ID
+    LOG_INFO("Source closure detected by BackchannelSink for session " << getClientSessionId());
+    // The source has closed (e.g., client disconnected sending RTCP BYE)
+    // We should stop playing, which will also call the afterPlaying function if set.
+    // Note: Don't call stopPlaying directly from here if it might delete the sink
+    //       or cause re-entrancy issues. Schedule it instead.
+    envir().taskScheduler().scheduleDelayedTask(0,
+        (TaskFunc*)[](void* cd) {
+            BackchannelSink* s = static_cast<BackchannelSink*>(cd);
+            if (s) s->stopPlaying(); // stopPlaying now handles timer cancellation and lock release
+        },
+        this); // Pass 'this' as client data
 }

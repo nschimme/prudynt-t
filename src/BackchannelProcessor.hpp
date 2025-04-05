@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <vector>
+#include <chrono> // For std::chrono::steady_clock
 #include "globals.hpp"
 #include "IMPBackchannel.hpp"
 
@@ -38,6 +39,8 @@ private:
 
     backchannel_stream* fStream; // Pointer to shared stream data (queue, running flag)
     FILE* fPipe;                 // Pipe to the external process (e.g., /bin/iac -s)
+    int fPipeFd;                 // File descriptor for non-blocking writes
+    std::chrono::steady_clock::time_point fLastPipeFullLogTime; // For rate-limiting logs
 
     // Prevent copying
     BackchannelProcessor(const BackchannelProcessor&) = delete;
