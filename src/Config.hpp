@@ -108,7 +108,6 @@ struct _rtsp {
     const char *username;
     const char *password;
     const char *name;
-    bool backchannel;
 };
 struct _sensor {
     int fps;
@@ -142,7 +141,7 @@ struct _image {
     int wb_bgain;
 
 };
-#if defined(AUDIO_SUPPORT)        
+#if defined(AUDIO_SUPPORT)
 struct _audio {
     bool input_enabled;
     const char *input_format;
@@ -158,6 +157,8 @@ struct _audio {
     int input_agc_target_level_dbfs;
     int input_agc_compression_gain_db;
     bool force_stereo;
+    bool output_enabled;
+    int output_sample_rate;
 #endif
 };
 #endif      

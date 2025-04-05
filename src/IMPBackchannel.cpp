@@ -7,16 +7,15 @@
 #define MODULE "IMPBackchannel"
 
 // Define static members
-// Define static members
 std::map<IMPAudioPalyloadType, int> IMPBackchannel::adecChannels;
 bool IMPBackchannel::decoderInitialized = false;
 
-int IMPBackchannel::init() { // Renamed from initADEC
+int IMPBackchannel::init() {
     if (decoderInitialized) {
-        LOG_WARN("IMPBackchannel ADEC already initialized."); // Updated log
+        LOG_WARN("IMPBackchannel ADEC already initialized.");
         return 0; // Already initialized
     }
-    LOG_INFO("Initializing IMPBackchannel ADEC resources..."); // Updated log
+    LOG_INFO("Initializing IMPBackchannel ADEC resources...");
     int ret = 0;
     bool success = false;
 
@@ -51,22 +50,22 @@ int IMPBackchannel::init() { // Renamed from initADEC
     // Add more channels here if needed
 
     if (!success) {
-        LOG_ERROR("Failed to initialize any IMPBackchannel ADEC channels."); // Updated log
+        LOG_ERROR("Failed to initialize any IMPBackchannel ADEC channels.");
         deinit(); // Clean up any partially created channels
         return -1;
     }
 
     decoderInitialized = true;
-    LOG_INFO("IMPBackchannel ADEC resources initialized successfully."); // Updated log
+    LOG_INFO("IMPBackchannel ADEC resources initialized successfully.");
     return 0;
 }
 
-void IMPBackchannel::deinit() { // Renamed from deinitADEC
+void IMPBackchannel::deinit() {
     if (!decoderInitialized) {
-        // LOG_DEBUG("IMPBackchannel ADEC not initialized or already deinitialized.");
+        // Not initialized or already deinitialized, nothing to do.
         return;
     }
-    LOG_INFO("Deinitializing IMPBackchannel ADEC resources..."); // Updated log
+    LOG_INFO("Deinitializing IMPBackchannel ADEC resources...");
     for (auto const& [payloadType, channelId] : adecChannels) {
         int ret = IMP_ADEC_DestroyChn(channelId);
         if (ret != 0) {
@@ -77,18 +76,17 @@ void IMPBackchannel::deinit() { // Renamed from deinitADEC
     }
     adecChannels.clear();
     decoderInitialized = false;
-    LOG_INFO("IMPBackchannel ADEC resources deinitialized."); // Updated log
+    LOG_INFO("IMPBackchannel ADEC resources deinitialized.");
 }
 
 int IMPBackchannel::getADECChannel(IMPAudioPalyloadType payloadType) {
      if (!decoderInitialized) {
-        // This might be called before init or after deinit, don't log error?
-        // LOG_ERROR("Cannot get ADEC channel: Decoder not initialized.");
+        // Decoder not initialized (e.g., called before init or after deinit).
         return -1;
     }
     auto it = adecChannels.find(payloadType);
     if (it == adecChannels.end()) {
-        // LOG_WARN("No decoder channel configured for payload type: " << payloadType);
+        // No specific channel configured for this type.
         return -1; // Not found
     }
     return it->second; // Return channel ID
@@ -105,7 +103,7 @@ BackchannelServerMediaSubsession* IMPBackchannel::createNewSubsession(UsageEnvir
     }
 
     // Create the Sink (which is also a FramedSource), passing the backchannel_stream pointer
-    BackchannelSink* sink = BackchannelSink::createNew(env, global_backchannel.get()); // Pass the raw pointer to the struct
+    BackchannelSink* sink = BackchannelSink::createNew(env, global_backchannel.get());
     if (!sink) {
         LOG_ERROR("Failed to create BackchannelSink!");
         return nullptr;
@@ -120,7 +118,5 @@ BackchannelServerMediaSubsession* IMPBackchannel::createNewSubsession(UsageEnvir
     }
 
     LOG_INFO("Backchannel subsession and sink created successfully.");
-    return subsession; // Success!
+    return subsession;
 }
-
-// --- decodeFrame method removed, logic moved to BackchannelProcessor ---

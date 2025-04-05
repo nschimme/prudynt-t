@@ -45,14 +45,19 @@ private:
     static void sourceClosureHandler(void* clientData);
     void handleSourceClosure(FramedSource* source);
 
+    // Static callback for silence timeout
+    static void silenceTimeoutHandler(void* clientData);
+
 
     // Overridden virtual methods for FramedSource (These might become NO-OPs or simplified)
     virtual void doGetNextFrame(); // This source doesn't produce frames for Live555 pipeline
     virtual void doStopGettingFrames(); // Needs to stop requesting from clients
 
     // --- Members for managing client sources ---
-    FramedSource* fControllingSource; // The client source currently allowed to send data
-    std::list<FramedSource*> fClientSources; // Keep track of client sources for fallback
+    FramedSource* fActiveTalker; // Tracks the source currently allowed to send
+    TaskToken fSilenceTimeoutTask; // Handle for the silence timeout task
+    unsigned fSilenceTimeoutMs; // Duration for silence timeout in ms (e.g., 500)
+    std::list<FramedSource*> fClientSources; // Keep track of all connected client sources
     std::map<FramedSource*, ClientSourceContext*> fSourceContexts; // Map sources to their callback contexts
 
     // --- Members for receiving data and queuing ---
@@ -62,14 +67,6 @@ private:
     MsgChannel<std::vector<uint8_t>>* fInputQueue; // Pointer to the worker's input queue (convenience, points into fStream)
 
     bool fIsCurrentlyGettingFrames; // Track if we should be actively getting frames from clients
-
-    // --- Removed members related to downstream delivery ---
-    // std::vector<u_int8_t> fLastDeliveredFrame;
-    // unsigned fLastFrameSize;
-    // struct timeval fLastPresentationTime;
-    // unsigned fLastDurationInMicroseconds;
-    // TaskToken fNextTask;
-    // void deliverFrame();
 };
 
 #endif // BACKCHANNEL_SINK_FRAMED_SOURCE_HPP

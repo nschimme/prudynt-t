@@ -1,27 +1,26 @@
 // Project Headers
 #include "BackchannelServerMediaSubsession.hpp"
-#include "BackchannelSink.hpp" // Use the renamed sink
-#include "Logger.hpp"   // For logging
+#include "BackchannelSink.hpp"
+#include "Logger.hpp"
 
 // Live555 Headers
 #include "BasicUsageEnvironment.hh"
 #include "RTPSource.hh" // Needed for RTPSource type definition
 
 // Standard C/C++ Headers
-// (None needed directly in this file after cleanup)
 
-#define MODULE "BackchannelSubsession" // Logger module name
+#define MODULE "BackchannelSubsession"
 
-BackchannelServerMediaSubsession* BackchannelServerMediaSubsession::createNew(UsageEnvironment& env, BackchannelSink* sink) { // Updated type
+BackchannelServerMediaSubsession* BackchannelServerMediaSubsession::createNew(UsageEnvironment& env, BackchannelSink* sink) {
     return new BackchannelServerMediaSubsession(env, sink);
 }
 
-BackchannelServerMediaSubsession::BackchannelServerMediaSubsession(UsageEnvironment& env, BackchannelSink* sink) // Updated type
-    : OnDemandServerMediaSubsession(env, True /*reuseFirstSource*/), fSDPLines(nullptr), fMySink(sink) { // Renamed member
+BackchannelServerMediaSubsession::BackchannelServerMediaSubsession(UsageEnvironment& env, BackchannelSink* sink)
+    : OnDemandServerMediaSubsession(env, True /*reuseFirstSource*/), fSDPLines(nullptr), fMySink(sink) {
     LOG_DEBUG("BackchannelServerMediaSubsession created");
-    if (fMySink == nullptr) { // Use fMySink
-        LOG_ERROR("BackchannelSink provided to BackchannelServerMediaSubsession is NULL!"); // Updated log
-        // Handle error appropriately
+    if (fMySink == nullptr) {
+        LOG_ERROR("BackchannelSink provided to BackchannelServerMediaSubsession is NULL!");
+        // TODO: Handle error appropriately (e.g., throw exception?)
     }
 }
 
@@ -99,26 +98,24 @@ void BackchannelServerMediaSubsession::startStream(unsigned clientSessionId, voi
      }
      LOG_DEBUG("Using RTPSource (streamToken) obtained from base class.");
 
-     if (fMySink) { // Use fMySink
-         fMySink->addSource(rtpSource); // Use fMySink
-         LOG_INFO("Added RTPSource to BackchannelSink for client session " << clientSessionId); // Updated log
+     if (fMySink) {
+         fMySink->addSource(rtpSource);
+         LOG_INFO("Added RTPSource to BackchannelSink for client session " << clientSessionId);
      } else {
-         LOG_ERROR("fMySink is NULL in startStream!"); // Use fMySink
+         LOG_ERROR("fMySink is NULL in startStream!");
      }
-
-     // LOG_INFO("Backchannel setup complete via startStream for client session " << clientSessionId); // Redundant?
  }
 
-void BackchannelServerMediaSubsession::deleteStream(unsigned clientSessionId, void*& streamToken) {
+ void BackchannelServerMediaSubsession::deleteStream(unsigned clientSessionId, void*& streamToken) {
     LOG_INFO("deleteStream called for client session ID " << clientSessionId);
 
      RTPSource* rtpSource = (RTPSource*)streamToken;
 
-     if (fMySink && rtpSource) { // Use fMySink
-         fMySink->removeSource(rtpSource); // Use fMySink
-         LOG_INFO("Removed RTPSource from BackchannelSink for client session " << clientSessionId); // Updated log
+     if (fMySink && rtpSource) {
+         fMySink->removeSource(rtpSource);
+         LOG_INFO("Removed RTPSource from BackchannelSink for client session " << clientSessionId);
      } else {
-          LOG_WARN("fMySink or rtpSource is NULL in deleteStream for client session " << clientSessionId); // Use fMySink
+          LOG_WARN("fMySink or rtpSource is NULL in deleteStream for client session " << clientSessionId);
      }
 
      OnDemandServerMediaSubsession::deleteStream(clientSessionId, streamToken);

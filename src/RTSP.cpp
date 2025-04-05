@@ -1,4 +1,5 @@
-#include "RTSP.hpp" // Includes IMPBackchannel.hpp
+#include "RTSP.hpp"
+#include "IMPBackchannel.hpp"
 #include "BackchannelServerMediaSubsession.hpp"
 
 #define MODULE "RTSP"
@@ -80,8 +81,8 @@ void RTSP::addSubsession(int chnNr, _stream &stream)
     }
 #endif
 
-    // Add backchannel subsession if enabled (Check config directly)
-    if (cfg->rtsp.backchannel) {
+#if defined(AUDIO_SUPPORT)
+    if (cfg->audio.output_enabled) {
         BackchannelServerMediaSubsession* backchannelSub = IMPBackchannel::createNewSubsession(*env);
         if (backchannelSub) {
             sms->addSubsession(backchannelSub);
@@ -90,6 +91,7 @@ void RTSP::addSubsession(int chnNr, _stream &stream)
             LOG_ERROR("Failed to create backchannel subsession via IMPBackchannel factory.");
         }
     }
+#endif
 
     rtspServer->addServerMediaSession(sms);
 
