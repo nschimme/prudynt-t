@@ -29,10 +29,10 @@ class MediaSink; // BackchannelSink will inherit from this
 #include "BackchannelStreamState.hpp"
 
  class BackchannelServerMediaSubsession : public ServerMediaSubsession { // Changed base class
-    friend class BackchannelStreamState; // Grant access to private members like fCNAME (Changed struct to class)
+ friend class BackchannelStreamState; // Grant access to private members like fCNAME (Changed struct to class)
  public:
      // Constructor now takes reuseFirstSource flag
-     static BackchannelServerMediaSubsession* createNew(UsageEnvironment& env, backchannel_stream* stream_data, Boolean reuseFirstSource = True); // Default to True per example comment
+     static BackchannelServerMediaSubsession* createNew(UsageEnvironment& env, backchannel_stream* stream_data, Boolean reuseFirstSource = False); // Default to FALSE
 
      virtual ~BackchannelServerMediaSubsession();
 

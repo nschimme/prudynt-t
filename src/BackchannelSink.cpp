@@ -6,8 +6,12 @@
 #include <GroupsockHelper.hh> // For closeSocket if needed, maybe not
 #include <RTPSource.hh>
 #include <vector>
+#include <atomic> // Include atomic header
 
 #define MODULE "BackchannelSink"
+
+// Initialize static members
+std::atomic<bool> BackchannelSink::gIsAudioOutputBusy{false}; // Define and initialize static atomic flag
 
 BackchannelSink* BackchannelSink::createNew(UsageEnvironment& env, backchannel_stream* stream_data) {
     return new BackchannelSink(env, stream_data);
@@ -20,7 +24,8 @@ BackchannelSink::BackchannelSink(UsageEnvironment& env, backchannel_stream* stre
       fInputQueue(nullptr),
       fIsActive(False),
       fAfterFunc(nullptr),
-      fAfterClientData(nullptr)
+      fAfterClientData(nullptr),
+      fHaveAudioOutputLock(false) // Initialize new member
 {
     LOG_DEBUG("BackchannelSink created (as MediaSink)");
     if (fStream == nullptr) {
@@ -43,6 +48,7 @@ BackchannelSink::BackchannelSink(UsageEnvironment& env, backchannel_stream* stre
 BackchannelSink::~BackchannelSink() {
     LOG_DEBUG("BackchannelSink destroyed");
     // Ensure we stop playing if active (should be stopped by StreamState already)
+    // Also release lock if held
     stopPlaying();
     delete[] fReceiveBuffer;
     // fInputQueue and fStream are managed externally
@@ -52,15 +58,41 @@ Boolean BackchannelSink::startPlaying(RTPSource& rtpSource,
                                       MediaSink::afterPlayingFunc* afterFunc,
                                       void* afterClientData)
 {
+    // --- Lock Acquisition Logic ---
+    // Try to acquire the audio output lock
+    bool expected = false;
+    if (gIsAudioOutputBusy.compare_exchange_strong(expected, true)) {
+        // Successfully acquired the lock
+        fHaveAudioOutputLock = true;
+        LOG_INFO("BackchannelSink acquired audio output lock.");
+        // Proceed with initializing audio playback... (Add IMP AOUT init here if needed)
+
+    } else {
+        // Lock was already held
+        fHaveAudioOutputLock = false;
+        LOG_WARN("BackchannelSink failed to acquire audio output lock (already busy). Will receive data but not play.");
+        // Do not initialize audio playback...
+    }
+    // --- End Lock Acquisition ---
+
+
+    // Original startPlaying logic (modified slightly)
     if (fIsActive) {
-        LOG_WARN("startPlaying called while already active");
-        return False; // Already playing
+        // This case should ideally not happen if lock logic is correct, but good to keep
+        LOG_WARN("startPlaying called while already active (fIsActive=True). This might indicate an issue.");
+         // If we somehow got the lock but were already active, release it
+         if (fHaveAudioOutputLock) {
+             gIsAudioOutputBusy.store(false);
+             fHaveAudioOutputLock = false;
+             LOG_WARN("Released lock due to being already active in startPlaying.");
+         }
+        return False;
     }
 
     fRTPSource = &rtpSource;
     fAfterFunc = afterFunc;
     fAfterClientData = afterClientData;
-    fIsActive = True;
+    fIsActive = True; // Mark as active *after* attempting lock acquisition
 
     // Increment active session count using fStream (atomically)
     // Do this *before* starting to get frames
@@ -91,8 +123,17 @@ void BackchannelSink::stopPlaying() {
         fRTPSource->stopGettingFrames();
     }
 
+    // --- Lock Release Logic ---
+    if (fHaveAudioOutputLock) {
+        gIsAudioOutputBusy.store(false); // Atomically release the lock
+        fHaveAudioOutputLock = false;    // Update instance state
+        LOG_INFO("BackchannelSink released audio output lock.");
+        // Add IMP AOUT stop/deinit logic here if needed
+    }
+    // --- End Lock Release ---
+
     // Decrement active session count (atomically)
-    // Do this *after* stopping frames
+    // Do this *after* stopping frames and releasing lock
     if (fStream) {
         int previous_count = fStream->active_sessions.fetch_sub(1, std::memory_order_relaxed);
         LOG_INFO("Backchannel sink stopped. Active sessions: " << previous_count - 1);
@@ -158,15 +199,21 @@ void BackchannelSink::afterGettingFrame1(unsigned frameSize, unsigned numTruncat
         // LOG_DEBUG("Received zero-sized frame. Ignoring."); // Can be noisy
     } else {
         // Valid frame received
-        // LOG_DEBUG("Received frame of size " << frameSize); // Can be very noisy
-        if (fInputQueue) {
-            // Copy data to a vector and queue it
-            std::vector<uint8_t> rtpPacket(fReceiveBuffer, fReceiveBuffer + frameSize);
-            if (!fInputQueue->write(std::move(rtpPacket))) {
-                 LOG_WARN("Backchannel input queue was full. Oldest packet dropped.");
+        // Only process/queue if we hold the audio lock
+        if (fHaveAudioOutputLock) {
+            // LOG_DEBUG("Received frame of size " << frameSize); // Can be very noisy
+            if (fInputQueue) {
+                // Copy data to a vector and queue it
+                std::vector<uint8_t> rtpPacket(fReceiveBuffer, fReceiveBuffer + frameSize);
+                if (!fInputQueue->write(std::move(rtpPacket))) {
+                     LOG_WARN("Backchannel input queue was full. Oldest packet dropped.");
+                }
+            } else {
+                 LOG_ERROR("Input queue is null, cannot queue packet!");
             }
         } else {
-             LOG_ERROR("Input queue is null, cannot queue packet!");
+            // We don't have the lock, discard the data silently or log optionally
+            // LOG_DEBUG("Discarding incoming backchannel frame, audio output lock not held.");
         }
     }
 
@@ -188,7 +235,7 @@ void MediaSink::onSourceClosure(void* clientData) {
         sink->envir().taskScheduler().scheduleDelayedTask(0,
             (TaskFunc*)[](void* cd) {
                 BackchannelSink* s = static_cast<BackchannelSink*>(cd);
-                if (s) s->stopPlaying();
+                if (s) s->stopPlaying(); // stopPlaying now handles lock release
             },
             sink);
     } else {

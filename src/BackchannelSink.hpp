@@ -7,6 +7,7 @@
 #include <map>
 #include <vector> // Needed for MsgChannel template
 #include <cstdint> // Needed for uint8_t
+#include <atomic> // For std::atomic<bool>
 
 #include "Logger.hpp"
 #include "MsgChannel.hpp" // Include MsgChannel definition
@@ -56,6 +57,10 @@ private:
     Boolean fIsActive; // Are we currently playing/consuming?
     MediaSink::afterPlayingFunc* fAfterFunc; // Callback when source stops
     void* fAfterClientData; // Client data for the callback
+
+    // --- Thread safety for shared audio output ---
+    static std::atomic<bool> gIsAudioOutputBusy; // Shared flag for all instances
+    bool fHaveAudioOutputLock;                   // Does this instance hold the lock?
 };
 
 #endif // BACKCHANNEL_SINK_FRAMED_SOURCE_HPP
