@@ -148,7 +148,7 @@ struct video_stream
 
      backchannel_stream()
          : inputQueue(std::make_shared<MsgChannel<BackchannelFrame>>(BACKCHANNEL_QUEUE_SIZE)),
-           imp_backchannel(new IMPBackchannel()),
+           imp_backchannel(nullptr),
            running(false) {}
 
      ~backchannel_stream() { // Destructor to clean up

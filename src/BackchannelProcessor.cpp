@@ -24,7 +24,7 @@ IMPAudioPalyloadType BackchannelProcessor::mapFormatToImpPayloadType(IMPBackchan
 }
 
 BackchannelProcessor::BackchannelProcessor()
-    : fPipe(nullptr), fPipeFd(-1), fLastPipeFullLogTime(std::chrono::steady_clock::time_point::min())
+    : fPipe(nullptr), fPipeFd(-1)
 {
 }
 
@@ -253,11 +253,7 @@ bool BackchannelProcessor::writePcmToPipe(const std::vector<int16_t>& pcmBuffer)
     else {
         int saved_errno = errno;
         if (saved_errno == EAGAIN || saved_errno == EWOULDBLOCK) {
-            auto now = std::chrono::steady_clock::now();
-            if (now - fLastPipeFullLogTime > std::chrono::seconds(5)) {
-                LOG_DEBUG("Pipe clogged (EAGAIN/EWOULDBLOCK). Discarding PCM chunk.");
-                fLastPipeFullLogTime = now;
-            }
+            LOG_WARN("Pipe clogged (EAGAIN/EWOULDBLOCK). Discarding PCM chunk.");
             return true;
         } else if (saved_errno == EPIPE) {
             LOG_ERROR("write() failed: Broken pipe (EPIPE). Assuming pipe closed by reader.");

@@ -74,15 +74,13 @@ void RTSP::addSubsession(int chnNr, _stream &stream)
     sms->addSubsession(sub);
 
 #if defined(AUDIO_SUPPORT)
-    if (cfg->audio.output_enabled) {
-        BackchannelServerMediaSubsession* backchannelSub = BackchannelServerMediaSubsession::createNew(*env);
-        sms->addSubsession(backchannelSub);
-        LOG_INFO("Backchannel subsession added.");
+    if (cfg->audio.input_enabled && stream.audio_enabled) {
+        IMPAudioServerMediaSubsession *audioSub = IMPAudioServerMediaSubsession::createNew(*env, 0);
+        sms->addSubsession(audioSub);
+        LOG_INFO("Audio stream " << chnNr << " added to session");
     }
-#endif
 
-#if defined(AUDIO_SUPPORT)
-    if (cfg->audio.output_enabled) {
+    if (cfg->audio.output_enabled && stream.audio_enabled) {
         BackchannelServerMediaSubsession* backchannelSub = BackchannelServerMediaSubsession::createNew(*env);
         sms->addSubsession(backchannelSub);
         LOG_INFO("Backchannel subsession added.");

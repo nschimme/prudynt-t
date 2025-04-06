@@ -13,7 +13,6 @@
 
 #define MODULE "BackchannelSink"
 
-
 std::atomic<bool> BackchannelSink::gIsAudioOutputBusy{false};
 
 BackchannelSink* BackchannelSink::createNew(UsageEnvironment& env,
@@ -67,7 +66,6 @@ Boolean BackchannelSink::startPlaying(FramedSource& source,
     } else {
         LOG_ERROR("global_backchannel is null in startPlaying! Cannot increment session count. (Session: " << fClientSessionId << ")");
     }
-
 
     LOG_INFO("Sink starting consumption for session " << fClientSessionId);
     return continuePlaying();

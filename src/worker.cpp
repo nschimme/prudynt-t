@@ -855,8 +855,6 @@ void *Worker::watch_config_poll(void *arg)
     }
 }
 
-
-// --- Implementation for Backchannel Processor Thread ---
 void *Worker::backchannel_processor(void *arg)
 {
     LOG_INFO("Backchannel processor thread starting...");
@@ -866,6 +864,8 @@ void *Worker::backchannel_processor(void *arg)
         return nullptr;
     }
 
+    global_backchannel->imp_backchannel = IMPBackchannel::createNew();
+ 
     BackchannelProcessor processor;
     global_backchannel->has_started.release();
     processor.run();

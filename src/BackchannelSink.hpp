@@ -55,7 +55,7 @@ private:
 
     FramedSource* fRTPSource;
     u_int8_t* fReceiveBuffer;
-    static const unsigned kReceiveBufferSize = 2048;
+    static const unsigned kReceiveBufferSize = 512;
 
     Boolean fIsActive;
     MediaSink::afterPlayingFunc* fAfterFunc;

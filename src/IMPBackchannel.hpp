@@ -23,6 +23,7 @@ const unsigned IMP_BACKCHANNEL_FREQ_PCMA = 8000;
 
 class IMPBackchannel {
 public:
+    static IMPBackchannel* createNew();
     IMPBackchannel();
     ~IMPBackchannel();
 

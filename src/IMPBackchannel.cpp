@@ -4,6 +4,10 @@
 
 #define MODULE "IMPBackchannel"
 
+IMPBackchannel* IMPBackchannel::createNew() {
+    return new IMPBackchannel();
+}
+
 std::map<IMPBackchannelFormat, int> IMPBackchannel::adecChannels;
 bool IMPBackchannel::decoderInitialized = false;
 
