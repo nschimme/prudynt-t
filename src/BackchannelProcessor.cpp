@@ -15,14 +15,6 @@
 
 #define MODULE "BackchannelProcessor"
 
-IMPAudioPalyloadType BackchannelProcessor::mapFormatToImpPayloadType(IMPBackchannelFormat format) {
-    switch (format) {
-        case IMPBackchannelFormat::PCMU: return PT_G711U;
-        case IMPBackchannelFormat::PCMA: return PT_G711A;
-        default: return PT_MAX;
-    }
-}
-
 BackchannelProcessor::BackchannelProcessor()
     : fPipe(nullptr), fPipeFd(-1)
 {
@@ -32,12 +24,18 @@ BackchannelProcessor::~BackchannelProcessor() {
     closePipe();
 }
 
-std::vector<int16_t> BackchannelProcessor::resampleLinear(const std::vector<int16_t>& input_pcm, int input_rate, int output_rate) {
-    if (input_rate <= 0 || output_rate <= 0 || input_pcm.empty()) {
-        LOG_ERROR("Invalid input for resampling: input_rate=" << input_rate << ", output_rate=" << output_rate << ", input_empty=" << input_pcm.empty());
-        return {};
-    }
+static int getFrequency(IMPBackchannelFormat format) {
+    #define RETURN_FREQUENCY(EnumName, NameString, PayloadType, Frequency, MimeType) \
+        {   \
+            if (IMPBackchannelFormat::EnumName == format) \
+                return Frequency; \
+        }
+    X_FOREACH_BACKCHANNEL_FORMAT(RETURN_FREQUENCY)
+    #undef RETURN_FREQUENCY
+    abort();
+}
 
+std::vector<int16_t> BackchannelProcessor::resampleLinear(const std::vector<int16_t>& input_pcm, int input_rate, int output_rate) {
     assert(input_rate != output_rate);
 
     double ratio = static_cast<double>(output_rate) / input_rate;
@@ -171,62 +169,37 @@ bool BackchannelProcessor::handleActiveState() {
     return true;
 }
 
-bool BackchannelProcessor::decodeFrame(const uint8_t* payload, size_t payloadSize, IMPBackchannelFormat format, std::vector<int16_t>& outPcmBuffer, int& outSampleRate) {
-    IMPAudioPalyloadType impPayloadType = mapFormatToImpPayloadType(format);
-    if (impPayloadType == PT_MAX) {
-        LOG_WARN("Unsupported format received: " << static_cast<int>(format));
+bool BackchannelProcessor::decodeFrame(const uint8_t* payload, size_t payloadSize, IMPBackchannelFormat format, std::vector<int16_t>& outPcmBuffer) {
+    IMPAudioStream stream_in;
+    stream_in.stream = const_cast<uint8_t*>(payload);
+    stream_in.len = static_cast<int>(payloadSize);
+
+    int adChn = (int)format;
+    int ret = IMP_ADEC_SendStream(adChn, &stream_in, BLOCK);
+    if (ret != 0) {
+        LOG_ERROR("IMP_ADEC_SendStream failed for channel " << adChn << ": " << ret);
         return false;
     }
 
-    if (impPayloadType == PT_G711A || impPayloadType == PT_G711U) {
-        if (!global_backchannel || !global_backchannel->imp_backchannel) return false;
-        int adChn = global_backchannel->imp_backchannel->getADECChannel(format);
-        if (adChn < 0) {
-            LOG_WARN("No ADEC channel ready for format: " << static_cast<int>(format));
-            return false;
+    IMPAudioStream stream_out;
+    ret = IMP_ADEC_GetStream(adChn, &stream_out, BLOCK);
+    if (ret == 0 && stream_out.len > 0 && stream_out.stream != nullptr) {
+        size_t num_samples = stream_out.len / sizeof(int16_t);
+        if (stream_out.len % sizeof(int16_t) != 0) {
+            LOG_WARN("Decoded stream length (" << stream_out.len << ") not multiple of int16_t size. Truncating.");
         }
-
-        IMPAudioStream stream_in;
-        stream_in.stream = const_cast<uint8_t*>(payload);
-        stream_in.len = static_cast<int>(payloadSize);
-
-        int ret = IMP_ADEC_SendStream(adChn, &stream_in, BLOCK);
-        if (ret != 0) {
-            LOG_ERROR("IMP_ADEC_SendStream failed for channel " << adChn << ": " << ret);
-            return false;
-        }
-
-        IMPAudioStream stream_out;
-        ret = IMP_ADEC_GetStream(adChn, &stream_out, BLOCK);
-        if (ret == 0 && stream_out.len > 0 && stream_out.stream != nullptr) {
-            size_t num_samples = stream_out.len / sizeof(int16_t);
-            if (stream_out.len % sizeof(int16_t) != 0) {
-                LOG_WARN("Decoded stream length (" << stream_out.len << ") not multiple of int16_t size. Truncating.");
-            }
-            outPcmBuffer.assign(reinterpret_cast<int16_t*>(stream_out.stream),
-                              reinterpret_cast<int16_t*>(stream_out.stream) + num_samples);
-            IMP_ADEC_ReleaseStream(adChn, &stream_out);
-            if (!global_backchannel || !global_backchannel->imp_backchannel) return false;
-            outSampleRate = global_backchannel->imp_backchannel->getFrequency(format);
-            if (outSampleRate == 0) {
-                 LOG_ERROR("Failed to get frequency for format: " << static_cast<int>(format));
-                 return false;
-            }
-            return true;
-        } else if (ret != 0) {
-            LOG_ERROR("IMP_ADEC_GetStream failed for channel " << adChn << ": " << ret);
-            return false;
-        } else {
-            LOG_DEBUG("ADEC_GetStream succeeded but produced no data.");
-            outPcmBuffer.clear();
-            outSampleRate = 0;
-            return true;
-        }
+        outPcmBuffer.assign(reinterpret_cast<int16_t*>(stream_out.stream),
+                            reinterpret_cast<int16_t*>(stream_out.stream) + num_samples);
+        IMP_ADEC_ReleaseStream(adChn, &stream_out);
+        return true;
+    } else if (ret != 0) {
+        LOG_ERROR("IMP_ADEC_GetStream failed for channel " << adChn << ": " << ret);
+        return false;
     }
 
-
-    LOG_ERROR("Decoder logic not implemented for format: " << static_cast<int>(format));
-    return false;
+    LOG_DEBUG("ADEC_GetStream succeeded but produced no data.");
+    outPcmBuffer.clear();
+    return true;
 }
 
 bool BackchannelProcessor::writePcmToPipe(const std::vector<int16_t>& pcmBuffer) {
@@ -272,25 +245,19 @@ bool BackchannelProcessor::writePcmToPipe(const std::vector<int16_t>& pcmBuffer)
 
 bool BackchannelProcessor::processFrame(const BackchannelFrame& frame) {
     std::vector<int16_t> decoded_pcm;
-    int input_rate = 0;
-    if (!decodeFrame(frame.payload.data(), frame.payload.size(), frame.format, decoded_pcm, input_rate)) {
+    if (!decodeFrame(frame.payload.data(), frame.payload.size(), frame.format, decoded_pcm)) {
         return true;
     }
 
+    int input_rate = getFrequency(frame.format);
+    int target_rate = cfg->audio.output_sample_rate;
     const std::vector<int16_t>* buffer_to_write = nullptr;
     std::vector<int16_t> final_pcm;
-
-    if (input_rate > 0) {
-        int target_rate = cfg->audio.output_sample_rate;
-
-        if (input_rate == target_rate) {
-            buffer_to_write = &decoded_pcm;
-        } else {
-            final_pcm = BackchannelProcessor::resampleLinear(decoded_pcm, input_rate, target_rate);
-            buffer_to_write = &final_pcm;
-        }
-    } else if (!decoded_pcm.empty()) {
-         LOG_WARN("Decoded PCM not empty, but input sample rate is zero. Cannot process.");
+    if (input_rate == target_rate) {
+        buffer_to_write = &decoded_pcm;
+    } else {
+        final_pcm = BackchannelProcessor::resampleLinear(decoded_pcm, input_rate, target_rate);
+        buffer_to_write = &final_pcm;
     }
 
     if (buffer_to_write != nullptr && !buffer_to_write->empty()) {

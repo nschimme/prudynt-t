@@ -9,6 +9,7 @@
 #include "RTPSource.hh"
 
 #include "BackchannelSink.hpp"
+#include "IMPBackchannel.hpp"
 
 struct sockaddr_storage;
 class Port;
@@ -25,7 +26,7 @@ class MediaSink;
  class BackchannelServerMediaSubsession : public ServerMediaSubsession {
  friend class BackchannelStreamState;
  public:
-     static BackchannelServerMediaSubsession* createNew(UsageEnvironment& env, Boolean reuseFirstSource = False);
+     static BackchannelServerMediaSubsession* createNew(UsageEnvironment& env, IMPBackchannelFormat format, Boolean reuseFirstSource = False);
 
      virtual ~BackchannelServerMediaSubsession();
 
@@ -34,7 +35,7 @@ public:
     virtual void closeStreamSink(MediaSink *outputSink);
 
  protected:
-     BackchannelServerMediaSubsession(UsageEnvironment& env, Boolean reuseFirstSource);
+     BackchannelServerMediaSubsession(UsageEnvironment& env, IMPBackchannelFormat format, Boolean reuseFirstSource);
 
     virtual char const* sdpLines(int addressFamily);
     virtual void getStreamParameters(unsigned clientSessionId,
@@ -75,6 +76,7 @@ private:
      Boolean fReuseFirstSource;
      portNumBits fInitialPortNum;
      Boolean fMultiplexRTCPWithRTP;
+     IMPBackchannelFormat fFormat;
 };
 
 #endif // BACKCHANNEL_SERVER_MEDIA_SUBSESSION_HPP

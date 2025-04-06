@@ -26,16 +26,16 @@ static void delayedDeleteTask(void* clientData) {
     delete state;
 }
 
-BackchannelServerMediaSubsession* BackchannelServerMediaSubsession::createNew(UsageEnvironment& env, Boolean reuseFirstSource) {
-    return new BackchannelServerMediaSubsession(env, reuseFirstSource);
+BackchannelServerMediaSubsession* BackchannelServerMediaSubsession::createNew(UsageEnvironment& env, IMPBackchannelFormat format, Boolean reuseFirstSource) {
+    return new BackchannelServerMediaSubsession(env, format, reuseFirstSource);
 }
 
-BackchannelServerMediaSubsession::BackchannelServerMediaSubsession(UsageEnvironment& env, Boolean reuseFirstSource)
+BackchannelServerMediaSubsession::BackchannelServerMediaSubsession(UsageEnvironment& env, IMPBackchannelFormat format, Boolean reuseFirstSource)
     : ServerMediaSubsession(env), fSDPLines(nullptr), /* fStreamData removed */
       fLastStreamToken(nullptr), fReuseFirstSource(reuseFirstSource),
-      fInitialPortNum(6970), fMultiplexRTCPWithRTP(False)
+      fInitialPortNum(6970), fMultiplexRTCPWithRTP(False), fFormat(format)
 {
-    LOG_DEBUG("Subsession created");
+    LOG_DEBUG("Subsession created for channel " << static_cast<int>(fFormat));
     fDestinationsHashTable = HashTable::create(ONE_WORD_HASH_KEYS);
     gethostname(fCNAME, MAX_CNAME_LEN);
     fCNAME[MAX_CNAME_LEN] = '\0';
@@ -66,16 +66,21 @@ char const* BackchannelServerMediaSubsession::sdpLines(int /*addressFamily*/) {
         fSDPLines = new char[sdpLinesSize];
         if (fSDPLines == nullptr) return nullptr;
 
-        // Determine format from config
-        const char* formatName = "PCMU";
-        int payloadType = 0;
-        unsigned frequency = 8000;
-        if (strcmp(cfg->audio.output_format, "G711A") == 0) {
-            formatName = "PCMA";
-            payloadType = 8;
-        } else if (strcmp(cfg->audio.output_format, "G711U") != 0) {
-            LOG_WARN("Unknown audio.output_format: " << cfg->audio.output_format << ". Defaulting to G711U.");
-        }
+        const char* formatName;
+        int payloadType;
+        unsigned frequency;
+
+        #define APPLY_SDP_IF(EnumName, NameString, PayloadType, Frequency, MimeType) \
+            if (fFormat == IMPBackchannelFormat::EnumName) { \
+                formatName = NameString; \
+                payloadType = PayloadType; \
+                frequency = Frequency; \
+            }
+
+        X_FOREACH_BACKCHANNEL_FORMAT(APPLY_SDP_IF)
+        #undef APPLY_SDP_IF
+
+        LOG_DEBUG("Generating SDP for format " << formatName << " (Payload Type: " << payloadType << ")");
 
         snprintf(fSDPLines, sdpLinesSize,
                  "m=audio 0 RTP/AVP %d\r\n"
@@ -99,33 +104,26 @@ char const* BackchannelServerMediaSubsession::sdpLines(int /*addressFamily*/) {
 
 MediaSink* BackchannelServerMediaSubsession::createNewStreamDestination(unsigned clientSessionId, unsigned& estBitrate) {
     estBitrate = 64; // G.711 bitrate
-    LOG_DEBUG("Creating new Sink for session " << clientSessionId);
-
-    // Determine format from config
-    IMPBackchannelFormat format = IMPBackchannelFormat::PCMU;
-    if (strcmp(cfg->audio.output_format, "G711A") == 0) {
-        format = IMPBackchannelFormat::PCMA;
-    } else if (strcmp(cfg->audio.output_format, "G711U") != 0) {
-        LOG_WARN("Unknown audio.output_format in createNewStreamDestination: " << cfg->audio.output_format << ". Defaulting to G711U/PCMA.");
-    }
-
-    LOG_INFO("Creating BackchannelSink with format: " << cfg->audio.output_format);
-    return BackchannelSink::createNew(envir(), clientSessionId, format);
+    LOG_INFO("Creating BackchannelSink for channel: " << static_cast<int>(fFormat));
+    return BackchannelSink::createNew(envir(), clientSessionId, fFormat);
 }
 
 RTPSource* BackchannelServerMediaSubsession::createNewRTPSource(Groupsock* rtpGroupsock, unsigned char /*rtpPayloadTypeIfDynamic*/, MediaSink* /*outputSink*/) {
-    LOG_DEBUG("Creating new RTPSource");
+    LOG_DEBUG("Creating new RTPSource for channel " << static_cast<int>(fFormat));
 
-    // Determine format from config
-    const char* mimeType = "audio/PCMA";
-    int payloadType = 0;
-    unsigned frequency = 8000;
-    if (strcmp(cfg->audio.output_format, "G711A") == 0) {
-        mimeType = "audio/PCMA";
-        payloadType = 8;
-    } else if (strcmp(cfg->audio.output_format, "G711U") != 0) {
-        LOG_WARN("Unknown audio.output_format: " << cfg->audio.output_format << ". Defaulting to G711U.");
-    }
+    const char* mimeType;
+    int payloadType;
+    unsigned frequency;
+
+    #define APPLY_SOURCE_IF(EnumName, NameString, PayloadType, Frequency, MimeType) \
+        if (fFormat == IMPBackchannelFormat::EnumName) { \
+            mimeType = MimeType; \
+            payloadType = PayloadType; \
+            frequency = Frequency; \
+        }
+
+    X_FOREACH_BACKCHANNEL_FORMAT(APPLY_SOURCE_IF)
+    #undef APPLY_SOURCE_IF
 
     LOG_INFO("Creating SimpleRTPSource with payloadType=" << payloadType << ", frequency=" << frequency << ", mimeType=" << mimeType);
     return SimpleRTPSource::createNew(envir(), rtpGroupsock,
