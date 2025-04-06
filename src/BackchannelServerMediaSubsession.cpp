@@ -1,28 +1,24 @@
-// Project Headers
 #include "BackchannelServerMediaSubsession.hpp"
 #include "BackchannelSink.hpp"
 #include "Logger.hpp"
-#include "globals.hpp" // For backchannel_stream definition
-#include "IMPBackchannel.hpp" // Include definition for IMPBackchannelFormat and constants
+#include "globals.hpp"
+#include "IMPBackchannel.hpp"
 
-// Live555 Headers
-#include <NetAddress.hh> // Moved include earlier
+#include <NetAddress.hh>
 #include <liveMedia.hh>
-#include <BasicUsageEnvironment.hh> // Needed for task scheduler
+#include <BasicUsageEnvironment.hh>
 #include <GroupsockHelper.hh>
-#include <SimpleRTPSource.hh> // Use SimpleRTPSource for receiving
+#include <SimpleRTPSource.hh>
 #include <HashTable.hh>
-#include "BackchannelStreamState.hpp" // Include for state definition in helper
+#include "BackchannelStreamState.hpp"
 
-// Standard C/C++ Headers
 #include <cassert>
-#include <unistd.h> // For gethostname
-#include <cstring>  // For memset
-#include <sys/time.h> // Needed for gettimeofday
+#include <unistd.h>
+#include <cstring>
+#include <sys/time.h>
 
 #define MODULE "BackchannelSubsession"
 
-// Static helper function for delayed deletion
 static void delayedDeleteTask(void* clientData) {
     BackchannelStreamState* state = (BackchannelStreamState*)clientData;
     LOG_WARN(">>> delayedDeleteTask: Deleting BackchannelStreamState");
@@ -30,38 +26,23 @@ static void delayedDeleteTask(void* clientData) {
 }
 
 
-// Define payload types (consistent with sdpLines)
-// #define PCMU_PAYLOAD_TYPE 0 // Replaced by enum
-// #define PCMA_PAYLOAD_TYPE 8 // Replaced by enum
-// #define BACKCHANNEL_TIMESTAMP_FREQ 8000 // Replaced by constants
-
-// ---------------------------------------------------------------------------
-// BackchannelServerMediaSubsession Implementation
-// ---------------------------------------------------------------------------
-
-// Updated createNew signature
 BackchannelServerMediaSubsession* BackchannelServerMediaSubsession::createNew(UsageEnvironment& env, backchannel_stream* stream_data, Boolean reuseFirstSource) {
     return new BackchannelServerMediaSubsession(env, stream_data, reuseFirstSource);
 }
 
-// Updated constructor signature and initialization list
 BackchannelServerMediaSubsession::BackchannelServerMediaSubsession(UsageEnvironment& env, backchannel_stream* stream_data, Boolean reuseFirstSource)
     : ServerMediaSubsession(env), fSDPLines(nullptr), fStreamData(stream_data),
-      fLastStreamToken(nullptr), fReuseFirstSource(reuseFirstSource), // Store reuse flag, init last token
-      fInitialPortNum(6970), fMultiplexRTCPWithRTP(False) // Initialize new members
+      fLastStreamToken(nullptr), fReuseFirstSource(reuseFirstSource),
+      fInitialPortNum(6970), fMultiplexRTCPWithRTP(False)
 {
     LOG_DEBUG("BackchannelServerMediaSubsession created (using ServerMediaSubsession base)");
-    fDestinationsHashTable = HashTable::create(ONE_WORD_HASH_KEYS); // Initialize destinations table
-    // Ensure fStreamData is valid if needed later
+    fDestinationsHashTable = HashTable::create(ONE_WORD_HASH_KEYS);
     if (fStreamData == nullptr) {
         LOG_WARN("backchannel_stream data provided is null!");
-        // Consider if this is a fatal error
     }
-    // Initialize CNAME
     gethostname(fCNAME, MAX_CNAME_LEN);
-    fCNAME[MAX_CNAME_LEN] = '\0'; // Ensure null termination
+    fCNAME[MAX_CNAME_LEN] = '\0';
 
-    // Ensure ports are even if not multiplexing (from reference constructor)
     if (!fMultiplexRTCPWithRTP) {
         fInitialPortNum = (fInitialPortNum + 1) & ~1;
     }
@@ -71,74 +52,59 @@ BackchannelServerMediaSubsession::~BackchannelServerMediaSubsession() {
     LOG_DEBUG("BackchannelServerMediaSubsession destroyed");
     delete[] fSDPLines;
 
-    // Clean out the destinations hash table:
     while (true) {
-        BackchannelDestinations* destinations = (BackchannelDestinations*)(fDestinationsHashTable->RemoveNext()); // Use renamed struct
+        BackchannelDestinations* destinations = (BackchannelDestinations*)(fDestinationsHashTable->RemoveNext());
         if (destinations == nullptr) break;
-        LOG_DEBUG("Deleting BackchannelDestinations object"); // Use renamed struct
+        LOG_DEBUG("Deleting BackchannelDestinations object");
         delete destinations;
     }
     delete fDestinationsHashTable;
-    // Note: Stream states pointed to by fLastStreamToken (if any)
-    // should be cleaned up via deleteStreamState calls from RTSPServer.
 }
 
-// Generate the SDP description for this subsession
-// Keeping the original simple SDP generation for recvonly
 char const* BackchannelServerMediaSubsession::sdpLines(int /*addressFamily*/) {
     if (fSDPLines == nullptr) {
         LOG_DEBUG("Generating SDP lines for backchannel (addressFamily ignored)");
 
-        unsigned int sdpLinesSize = 300; // Increased buffer size slightly
+        unsigned int sdpLinesSize = 300;
         fSDPLines = new char[sdpLinesSize];
         if (fSDPLines == nullptr) return nullptr;
 
-        // Modify SDP to offer only PCMA (Payload Type 8)
         snprintf(fSDPLines, sdpLinesSize,
-                 "m=audio 0 RTP/AVP %d\r\n" // Only list PT 8
+                 "m=audio 0 RTP/AVP %d\r\n"
                  "c=IN IP4 0.0.0.0\r\n"
                  "b=AS:64\r\n"
-                  // "a=rtpmap:%d PCMU/%u/1\r\n" // Remove PCMU line
-                  "a=rtpmap:%d PCMA/%u/1\r\n" // Keep PCMA line
+                  "a=rtpmap:%d PCMA/%u/1\r\n"
                   "a=control:%s\r\n"
-                  "a=sendonly\r\n", // Keep sendonly as per ONVIF context
-                  IMPBackchannel::rtpPayloadTypeFromFormat(IMPBackchannelFormat::PCMA), // Only PT 8
-                  // IMPBackchannel::rtpPayloadTypeFromFormat(IMPBackchannelFormat::PCMU), IMPBackchannel::getFrequency(IMPBackchannelFormat::PCMU), // Remove PCMU params
-                  IMPBackchannel::rtpPayloadTypeFromFormat(IMPBackchannelFormat::PCMA), IMPBackchannel::getFrequency(IMPBackchannelFormat::PCMA), // Keep PCMA params
+                  "a=sendonly\r\n",
+                  IMPBackchannel::rtpPayloadTypeFromFormat(IMPBackchannelFormat::PCMA),
+                  IMPBackchannel::rtpPayloadTypeFromFormat(IMPBackchannelFormat::PCMA), IMPBackchannel::getFrequency(IMPBackchannelFormat::PCMA),
                   trackId()
          );
 
-        fSDPLines[sdpLinesSize - 1] = '\0'; // Null-terminate
+        fSDPLines[sdpLinesSize - 1] = '\0';
     }
     return fSDPLines;
 }
 
 MediaSink* BackchannelServerMediaSubsession::createNewStreamDestination(unsigned clientSessionId, unsigned& estBitrate) {
-    estBitrate = 64; // kbps
+    estBitrate = 64;
     LOG_DEBUG("Creating new BackchannelSink for client session " << clientSessionId);
-    // Pass the expected format (PCMA) to the sink constructor
-    IMPBackchannelFormat format = IMPBackchannelFormat::PCMA; // Match the source format
+    IMPBackchannelFormat format = IMPBackchannelFormat::PCMA;
     return BackchannelSink::createNew(envir(), fStreamData, clientSessionId, format);
 }
 
 RTPSource* BackchannelServerMediaSubsession::createNewRTPSource(Groupsock* rtpGroupsock, unsigned char /*rtpPayloadTypeIfDynamic*/, MediaSink* /*outputSink*/) {
     LOG_DEBUG("Creating new SimpleRTPSource for backchannel");
-    // Restore original logic, corrected for channels and frequency helper:
-     // Use PCMA frequency and payload type
-     // Specify 1 channel for mono audio.
      return SimpleRTPSource::createNew(envir(), rtpGroupsock,
-                                       IMPBackchannel::rtpPayloadTypeFromFormat(IMPBackchannelFormat::PCMA), // Use PT 8
-                                       IMPBackchannel::getFrequency(IMPBackchannelFormat::PCMA), // Use PCMA frequency
-                                       "audio/PCMA", // Set mime type
-                                       0 /* num channels */,
-                                       False /* no RTCP - handled by StreamState */);
+                                       IMPBackchannel::rtpPayloadTypeFromFormat(IMPBackchannelFormat::PCMA),
+                                       IMPBackchannel::getFrequency(IMPBackchannelFormat::PCMA),
+                                       "audio/PCMA",
+                                       0,
+                                       False);
 }
 
-// Helper to get server ports from existing state (for reuse logic) - Kept from original
 Boolean BackchannelServerMediaSubsession::getServerPorts(Port& rtpPort, Port& rtcpPort) {
     if (fLastStreamToken == nullptr) return False;
-    // Need to cast to the correct StreamState type used by the reference logic
-    // Assuming BackchannelStreamState is compatible or we adapt it.
     BackchannelStreamState* lastState = (BackchannelStreamState*)fLastStreamToken;
     if (lastState->rtpGS == nullptr || lastState->rtcpGS == nullptr) {
          LOG_WARN("getServerPorts: Cannot reuse state as it lacks UDP groupsocks (likely TCP state).");
@@ -149,14 +115,10 @@ Boolean BackchannelServerMediaSubsession::getServerPorts(Port& rtpPort, Port& rt
     return True;
 }
 
-// Helper for SDP generation (not needed for recvonly) - Kept from original
 char const* BackchannelServerMediaSubsession::getAuxSDPLine(RTPSink* /*rtpSink*/, FramedSource* /*inputSource*/) {
     return nullptr;
 }
 
-// ---------------------------------------------------------------------------
-// getStreamParameters - Replaced with logic from OnDemandServerMediaSubsession_BC
-// ---------------------------------------------------------------------------
 void BackchannelServerMediaSubsession::getStreamParameters(unsigned clientSessionId,
                                      struct sockaddr_storage const& clientAddress,
                                      Port const& clientRTPPort,
@@ -166,37 +128,31 @@ void BackchannelServerMediaSubsession::getStreamParameters(unsigned clientSessio
                                      unsigned char rtcpChannelId,
                                      TLSState* tlsState,
                                      struct sockaddr_storage& destinationAddress,
-                                     u_int8_t& /*destinationTTL*/, // Not used directly by reference
+                                     u_int8_t& /*destinationTTL*/,
                                      Boolean& isMulticast,
                                      Port& serverRTPPort,
                                      Port& serverRTCPPort,
                                      void*& streamToken)
 {
-    // --- Add Detailed Parameter Logging ---
     LOG_INFO(">>> getStreamParameters RAW INPUT for session " << clientSessionId
              << ": clientRTPPort=" << ntohs(clientRTPPort.num())
              << ", clientRTCPPort=" << ntohs(clientRTCPPort.num())
              << ", tcpSocketNum=" << tcpSocketNum);
-    // --- End Detailed Logging ---
 
-    LOG_WARN(">>> getStreamParameters ENTERED for session " << clientSessionId); // Keep existing WARN for now
-    isMulticast = False; // Always unicast for this type
+    LOG_WARN(">>> getStreamParameters ENTERED for session " << clientSessionId);
+    isMulticast = False;
     streamToken = nullptr;
 
-    // Handle destination address (from reference)
     if (addressIsNull(destinationAddress)) {
-        // normal case - use the client address as the destination address:
         destinationAddress = clientAddress;
     }
 
-    // Check for reuse FIRST (from reference)
     if (fLastStreamToken != nullptr && fReuseFirstSource) {
         LOG_INFO("Reusing existing stream state for client session " << clientSessionId);
-        // Retrieve server ports from the existing state
         BackchannelStreamState* lastState = (BackchannelStreamState*)fLastStreamToken;
         if (lastState->rtpGS == nullptr || lastState->rtcpGS == nullptr) {
              LOG_ERROR("Failed to get server ports from reusable stream state (not UDP?)!");
-             return; // Cannot reuse non-UDP state? Or handle differently?
+             return;
         }
         serverRTPPort = lastState->rtpGS->port();
         serverRTCPPort = lastState->rtcpGS->port();
@@ -204,46 +160,40 @@ void BackchannelServerMediaSubsession::getStreamParameters(unsigned clientSessio
         streamToken = fLastStreamToken;
         LOG_DEBUG("getStreamParameters (reused state): Ref count now " << lastState->referenceCount());
     } else {
-        // Normal case: Create a new media source and stream state:
         LOG_WARN(">>> getStreamParameters: Not reusing state for session " << clientSessionId << ". Proceeding to create new state.");
-        unsigned streamBitrate = 0; // Not strictly needed for sink/source creation here
+        unsigned streamBitrate = 0;
         MediaSink* mediaSink = nullptr;
         RTPSource* rtpSource = nullptr;
         Groupsock* rtpGroupsock = nullptr;
         Groupsock* rtcpGroupsock = nullptr;
-        /* BasicUDPSource* udpSource = nullptr; // Removed unused variable */
 
-        // Create the sink (our specific implementation)
         LOG_WARN(">>> getStreamParameters: Calling createNewStreamDestination for session " << clientSessionId);
-        mediaSink = createNewStreamDestination(clientSessionId, streamBitrate); // Use our override
+        mediaSink = createNewStreamDestination(clientSessionId, streamBitrate);
         if (mediaSink == nullptr) {
             LOG_ERROR(">>> getStreamParameters: createNewStreamDestination FAILED for session " << clientSessionId);
             return;
         }
         LOG_WARN(">>> getStreamParameters: createNewStreamDestination SUCCEEDED for session " << clientSessionId << ". Sink: " << (int)mediaSink);
 
-        // Create groupsocks and allocate ports if UDP
-        if (clientRTPPort.num() != 0 || tcpSocketNum >= 0) { // From reference (check if client ports or TCP socket provided)
+        if (clientRTPPort.num() != 0 || tcpSocketNum >= 0) {
             if (clientRTCPPort.num() == 0 && tcpSocketNum < 0) {
                  LOG_ERROR("Raw UDP streaming not supported for backchannel");
-                 // Cleanup sink
                  if (mediaSink) Medium::close(mediaSink);
                  return;
-            } else if (tcpSocketNum < 0) { // Normal UDP case
+            } else if (tcpSocketNum < 0) {
                 LOG_WARN(">>> getStreamParameters: Attempting UDP port allocation for session " << clientSessionId);
-                NoReuse dummy(envir()); // ensures that we skip over ports that are already in use
+                NoReuse dummy(envir());
                 portNumBits serverPortNum = fInitialPortNum;
                 while(1) {
                     serverRTPPort = serverPortNum;
-                    // Use null address for listening
                     struct sockaddr_storage nullAddr;
                     memset(&nullAddr, 0, sizeof(nullAddr));
-                    nullAddr.ss_family = AF_INET; // Assuming IPv4 for simplicity
+                    nullAddr.ss_family = AF_INET;
                     rtpGroupsock = new Groupsock(envir(), nullAddr, serverRTPPort, 255);
                     if (rtpGroupsock->socketNum() < 0) {
                         delete rtpGroupsock; rtpGroupsock = nullptr;
-                        serverPortNum += (fMultiplexRTCPWithRTP ? 1 : 2); // Increment correctly
-                        continue; // try again
+                        serverPortNum += (fMultiplexRTCPWithRTP ? 1 : 2);
+                        continue;
                     }
 
                     if (fMultiplexRTCPWithRTP) {
@@ -255,44 +205,33 @@ void BackchannelServerMediaSubsession::getStreamParameters(unsigned clientSessio
                         if (rtcpGroupsock->socketNum() < 0) {
                             delete rtpGroupsock; rtpGroupsock = nullptr;
                             delete rtcpGroupsock; rtcpGroupsock = nullptr;
-                            ++serverPortNum; // Skip this pair
-                            continue; // try again
+                            ++serverPortNum;
+                            continue;
                         }
                      }
-                     break; // success
+                     break;
                  }
-                 // --- Increase Receive Buffer Size ---
                  if (rtpGroupsock != nullptr && rtpGroupsock->socketNum() >= 0) {
-                     unsigned requestedSize = 262144; // 256KB
+                     unsigned requestedSize = 262144;
                      LOG_INFO(">>> Attempting to increase RTP socket receive buffer for session " << clientSessionId << " to " << requestedSize);
                      increaseReceiveBufferTo(envir(), rtpGroupsock->socketNum(), requestedSize);
-                     // Note: increaseReceiveBufferTo returns void, so we can't directly log success/failure easily without getsockopt.
-                     // We'll assume it likely worked or failed silently if permissions/limits prevent it.
                  }
-                 // --- End Increase Buffer ---
                  LOG_WARN(">>> getStreamParameters: UDP port allocation SUCCEEDED for session " << clientSessionId << ". RTP=" << ntohs(serverRTPPort.num()) << ", RTCP=" << ntohs(serverRTCPPort.num()));
-             } else { // TCP Interleaved
+             } else {
                   LOG_WARN(">>> getStreamParameters: Client requested TCP interleaved mode for session " << clientSessionId);
                  serverRTPPort = 0;
                  serverRTCPPort = 0;
                  rtpGroupsock = nullptr;
                  rtcpGroupsock = nullptr;
-                 // --- Create a dummy groupsock for TCP mode ---
-                 // SimpleRTPSource might still require a valid Groupsock object even if not used for UDP.
-                 struct sockaddr_storage dummyAddr; memset(&dummyAddr, 0, sizeof dummyAddr); dummyAddr.ss_family = AF_INET; // Use AF_INET or AF_INET6
+                 struct sockaddr_storage dummyAddr; memset(&dummyAddr, 0, sizeof dummyAddr); dummyAddr.ss_family = AF_INET;
                  Port dummyPort(0);
-                 rtpGroupsock = new Groupsock(envir(), dummyAddr, dummyPort, 0); // Create dummy RTP groupsock
-                 // --- Create a dummy RTCP groupsock for TCP mode as well ---
-                 // RTCPInstance::createNew seems to require a valid groupsock even if not used for UDP RTCP.
-                 rtcpGroupsock = new Groupsock(envir(), dummyAddr, dummyPort, 0); // Create dummy RTCP groupsock
+                 rtpGroupsock = new Groupsock(envir(), dummyAddr, dummyPort, 0);
+                 rtcpGroupsock = new Groupsock(envir(), dummyAddr, dummyPort, 0);
                  LOG_WARN(">>> getStreamParameters: Created dummy RTP Groupsock (" << (int)rtpGroupsock << ") and dummy RTCP Groupsock (" << (int)rtcpGroupsock << ") for TCP mode.");
-                 // BackchannelStreamState destructor needs to handle deleting both potentially dummy groupsocks.
             }
 
-            // Create the RTPSource (our specific implementation)
             LOG_WARN(">>> getStreamParameters: Calling createNewRTPSource for session " << clientSessionId);
-            // Payload type doesn't matter much here for SimpleRTPSource
-            rtpSource = createNewRTPSource(rtpGroupsock, 0, mediaSink); // Use our override
+            rtpSource = createNewRTPSource(rtpGroupsock, 0, mediaSink);
             if (rtpSource == nullptr) {
                 LOG_ERROR(">>> getStreamParameters: createNewRTPSource FAILED for session " << clientSessionId);
                 if (mediaSink) Medium::close(mediaSink);
@@ -308,21 +247,17 @@ void BackchannelServerMediaSubsession::getStreamParameters(unsigned clientSessio
              return;
         }
 
-        // Create and store the stream state (using our state class)
         LOG_WARN(">>> getStreamParameters: Creating BackchannelStreamState for session " << clientSessionId);
-        // Pass necessary components to state constructor
-        // Note: For TCP, rtcpGroupsock is NULL, rtpGroupsock is the dummy one.
         BackchannelStreamState* state = new BackchannelStreamState(*this, rtpSource, (BackchannelSink*)mediaSink, rtpGroupsock, rtcpGroupsock, clientSessionId);
         streamToken = fLastStreamToken = (void*)state;
         LOG_WARN(">>> getStreamParameters: Created BackchannelStreamState for session " << clientSessionId << ". State: " << (int)state << ". Assigned to streamToken.");
     }
 
-    // Record these destinations as being for this client session id (common logic)
     BackchannelDestinations* destinations;
     LOG_WARN(">>> getStreamParameters: Creating BackchannelDestinations for session " << clientSessionId);
-    if (tcpSocketNum < 0) { // UDP
-        destinations = new BackchannelDestinations(destinationAddress, clientRTPPort, clientRTCPPort); // Use destinationAddress now
-    } else { // TCP
+    if (tcpSocketNum < 0) {
+        destinations = new BackchannelDestinations(destinationAddress, clientRTPPort, clientRTCPPort);
+    } else {
         destinations = new BackchannelDestinations(tcpSocketNum, rtpChannelId, rtcpChannelId, tlsState);
     }
     LOG_WARN(">>> getStreamParameters: Created BackchannelDestinations for session " << clientSessionId << ". Destinations: " << (int)destinations);
@@ -334,12 +269,9 @@ void BackchannelServerMediaSubsession::getStreamParameters(unsigned clientSessio
     LOG_WARN(">>> getStreamParameters FINISHED for session " << clientSessionId << ". streamToken OUT: " << (int)streamToken << ", destinations ADDED: " << (int)destinations);
 }
 
-// ---------------------------------------------------------------------------
-// startStream - Replaced with logic from OnDemandServerMediaSubsession_BC
-// ---------------------------------------------------------------------------
 void BackchannelServerMediaSubsession::startStream(unsigned clientSessionId, void* streamToken,
                              TaskFunc* rtcpRRHandler, void* rtcpRRHandlerClientData,
-                             unsigned short& rtpSeqNum, unsigned& rtpTimestamp, // Use these now
+                             unsigned short& rtpSeqNum, unsigned& rtpTimestamp,
                              ServerRequestAlternativeByteHandler* serverRequestAlternativeByteHandler,
                              void* serverRequestAlternativeByteHandlerClientData)
  {
@@ -354,22 +286,16 @@ void BackchannelServerMediaSubsession::startStream(unsigned clientSessionId, voi
     }
      if (dests == nullptr) {
          LOG_ERROR("startStream failed to find Destinations for client session " << clientSessionId);
-         // Maybe delete state here as it's orphaned? Consider implications.
          return;
      }
 
-    // Call the state's startPlaying method (which now handles RTCP setup etc.)
     state->startPlaying(dests, rtcpRRHandler, rtcpRRHandlerClientData,
                         serverRequestAlternativeByteHandler, serverRequestAlternativeByteHandlerClientData);
 
-    // Set output sequence number and timestamp (from reference)
-    // These might be less relevant for a recvonly sink, but follow the pattern.
-    RTPSource* rtpSource = state->rtpSource; // Get source from state
+    RTPSource* rtpSource = state->rtpSource;
     if (rtpSource != nullptr) {
-        // Note: For a receiver, curPacketRTPSeqNum/Timestamp might not be meaningful
-        // until packets arrive. Initialize to 0 or a sensible default.
-        rtpSeqNum = 0; // rtpSource->curPacketRTPSeqNum();
-        rtpTimestamp = 0; // rtpSource->curPacketRTPTimestamp();
+        rtpSeqNum = 0;
+        rtpTimestamp = 0;
         LOG_DEBUG("startStream: Initializing rtpSeqNum=" << rtpSeqNum << ", rtpTimestamp=" << rtpTimestamp << " for session " << clientSessionId);
     } else {
          rtpSeqNum = 0;
@@ -379,17 +305,12 @@ void BackchannelServerMediaSubsession::startStream(unsigned clientSessionId, voi
  }
 
 
-// ---------------------------------------------------------------------------
-// deleteStreamState - Kept mostly original, ensure compatibility with new state mgmt
-// ---------------------------------------------------------------------------
 void BackchannelServerMediaSubsession::deleteStreamState(void*& streamToken) {
-    // --- Enhanced Logging ---
     char timeBuf[128];
     struct timeval now;
     gettimeofday(&now, NULL);
     strftime(timeBuf, sizeof(timeBuf), "%Y-%m-%d %H:%M:%S", localtime(&now.tv_sec));
     LOG_WARN(">>> deleteStreamState called at " << timeBuf << "." << (int)(now.tv_usec / 1000) << " with token: " << (int)streamToken);
-    // --- End Enhanced Logging ---
 
     if (streamToken == nullptr) {
         LOG_WARN(">>> deleteStreamState: streamToken is already NULL. Returning.");
@@ -405,7 +326,6 @@ void BackchannelServerMediaSubsession::deleteStreamState(void*& streamToken) {
             LOG_WARN(">>> deleteStreamState: Reference count is now zero. Proceeding with deletion for session " << state->clientSessionId);
             unsigned sid = state->clientSessionId;
 
-            // Remove and delete destinations from hash table
             LOG_DEBUG("deleteStreamState: Looking up destinations for clientSessionId: " << sid);
             BackchannelDestinations* dests = (BackchannelDestinations*)(fDestinationsHashTable->Lookup((char const*)sid));
             LOG_DEBUG("deleteStreamState: Found destinations pointer: " << (int)dests << ". Removing from table if found.");
@@ -418,17 +338,14 @@ void BackchannelServerMediaSubsession::deleteStreamState(void*& streamToken) {
                 LOG_WARN(">>> deleteStreamState: No Destinations found in hash table for session " << sid << " to remove.");
             }
 
-            // Clear fLastStreamToken if it matches the one being deleted
             if (streamToken == fLastStreamToken) {
                 LOG_WARN(">>> deleteStreamState: Clearing fLastStreamToken because it matches the token being deleted.");
                 fLastStreamToken = nullptr;
             }
 
-            // Schedule the state object deletion instead of deleting directly
             LOG_WARN(">>> deleteStreamState: Scheduling delayed deletion of BackchannelStreamState object for session " << sid << " at address " << (int)state);
             envir().taskScheduler().scheduleDelayedTask(0, (TaskFunc*)delayedDeleteTask, state);
-            // We still clear the caller's token immediately, but the object persists until the task runs.
-            state = nullptr; // Mark state as scheduled for deletion for the check below
+            state = nullptr;
 
         } else {
              LOG_WARN(">>> deleteStreamState: Decremented reference count for client session " << state->clientSessionId << " to " << state->referenceCount() << ". State not deleted (token: " << (int)streamToken << ")");
@@ -437,8 +354,7 @@ void BackchannelServerMediaSubsession::deleteStreamState(void*& streamToken) {
         LOG_WARN(">>> deleteStreamState called with state pointer already NULL (token: " << (int)streamToken << ")");
     }
 
-    // Clear the caller's streamToken pointer *only* if the state was actually deleted
-    if (state == nullptr) { // Check if delete happened above
+    if (state == nullptr) {
          LOG_WARN(">>> deleteStreamState: Clearing caller's streamToken pointer.");
          streamToken = nullptr;
     } else {
@@ -446,9 +362,6 @@ void BackchannelServerMediaSubsession::deleteStreamState(void*& streamToken) {
     }
 }
 
-// --- Methods inherited from ServerMediaSubsession but not strictly needed for basic recvonly ---
-
-// Kept original implementations
 void BackchannelServerMediaSubsession::closeStreamSource(FramedSource *inputSource) {
      Medium::close(inputSource);
 }
@@ -456,13 +369,11 @@ void BackchannelServerMediaSubsession::closeStreamSink(MediaSink *outputSink) {
      Medium::close(outputSink);
 }
 
-// Kept original implementation
 void BackchannelServerMediaSubsession::getRTPSinkandRTCP(void* streamToken, RTPSink*& rtpSink, RTCPInstance*& rtcp) {
-    rtpSink = nullptr; // We don't send RTP
-    // Retrieve RTCP from StreamState if needed (as done in BackchannelStreamState::startPlaying)
+    rtpSink = nullptr;
     BackchannelStreamState* state = (BackchannelStreamState*)streamToken;
     if (state) {
-        rtcp = state->rtcpInstance; // Access the instance created in startPlaying
+        rtcp = state->rtcpInstance;
     } else {
         rtcp = nullptr;
     }
