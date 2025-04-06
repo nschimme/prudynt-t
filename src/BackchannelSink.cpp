@@ -33,7 +33,7 @@ BackchannelSink::BackchannelSink(UsageEnvironment& env,
       fFormat(format)
 {
     LOG_DEBUG("Sink created for session " << fClientSessionId << " format " << static_cast<int>(fFormat));
-    fReceiveBuffer = new u_int8_t[kReceiveBufferSize];
+    fReceiveBuffer = new u_int8_t[BACKCHANNEL_RECEIVE_BUFFER_SIZE];
     if (fReceiveBuffer == nullptr) {
         LOG_ERROR("Failed to allocate receive buffer (Session: " << fClientSessionId << ")");
     }
@@ -119,7 +119,7 @@ Boolean BackchannelSink::continuePlaying() {
         return False;
     }
 
-    fRTPSource->getNextFrame(fReceiveBuffer, kReceiveBufferSize,
+    fRTPSource->getNextFrame(fReceiveBuffer, BACKCHANNEL_RECEIVE_BUFFER_SIZE,
                              afterGettingFrame, this,
                              staticOnSourceClosure, this);
 
