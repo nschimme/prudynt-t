@@ -4,6 +4,7 @@
 // Define the list of backchannel formats and their properties
 // X(EnumName, NameString, PayloadType, Frequency, MimeType)
 #define X_FOREACH_BACKCHANNEL_FORMAT(X) \
+    X(OPUS, "OPUS", 96, 48000, "audio/OPUS") \
     X(PCMU, "PCMU", 0, 8000, "audio/PCMU") \
     X(PCMA, "PCMA", 8, 8000, "audio/PCMA") \
     /* Add new formats here */

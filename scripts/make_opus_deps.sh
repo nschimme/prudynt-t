@@ -62,9 +62,9 @@ cmake \
     -DCMAKE_SYSTEM_PROCESSOR=mipsle \
     -DCMAKE_C_COMPILER=${CC} \
     -DCMAKE_CXX_COMPILER=${CXX} \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_C_FLAGS="-Os" \
-    -DCMAKE_CXX_FLAGS="-Os" \
+    -DCMAKE_BUILD_TYPE=Debug \
+    -DCMAKE_C_FLAGS="-g" \
+    -DCMAKE_CXX_FLAGS="-g" \
     -DCMAKE_INSTALL_PREFIX="${BUILD_DIR}/install" \
     -DBUILD_SHARED_LIBS=${BUILD_SHARED_LIBS} \
     ..
@@ -73,7 +73,8 @@ echo "Building Opus library..."
 make -j$(nproc)
 
 if [ -f "${BUILD_DIR}/install/lib/libopus.so" ]; then
-	$STRIP "${BUILD_DIR}/install/lib/libopus.so"
+	#$STRIP "${BUILD_DIR}/install/lib/libopus.so"
+	echo hi
 fi
 
 # Install Opus library and headers

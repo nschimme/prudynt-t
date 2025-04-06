@@ -1,8 +1,8 @@
 #include "BackchannelServerMediaSubsession.hpp"
 #include "BackchannelSink.hpp"
 #include "Logger.hpp"
-#include "globals.hpp"
-#include "Config.hpp"
+#include "globals.hpp" // Needed for cfg
+#include "Config.hpp"  // Needed for cfg
 #include "IMPBackchannel.hpp"
 
 #include <NetAddress.hh>
@@ -17,6 +17,7 @@
 #include <unistd.h>
 #include <cstring>
 #include <sys/time.h>
+#include <string> // Needed for std::string
 
 #define MODULE "BackchannelSubsession"
 
@@ -62,7 +63,8 @@ char const* BackchannelServerMediaSubsession::sdpLines(int /*addressFamily*/) {
     if (fSDPLines == nullptr) {
         LOG_DEBUG("Generating SDP lines");
 
-        unsigned int sdpLinesSize = 300;
+        // Increase size for potential fmtp line
+        unsigned int sdpLinesSize = 400; 
         fSDPLines = new char[sdpLinesSize];
         if (fSDPLines == nullptr) return nullptr;
 
@@ -82,29 +84,44 @@ char const* BackchannelServerMediaSubsession::sdpLines(int /*addressFamily*/) {
 
         LOG_DEBUG("Generating SDP for format " << formatName << " (Payload Type: " << payloadType << ")");
 
+        // Construct fmtp line only for Opus
+        std::string fmtpLine = "";
+        if (fFormat == IMPBackchannelFormat::OPUS) {
+            char fmtpBuf[100];
+            snprintf(fmtpBuf, sizeof(fmtpBuf), 
+                     "a=fmtp:%d stereo=0; ptime=20; maxplaybackrate=%d; sprop-maxcapturerate=%d\r\n", 
+                     payloadType, cfg->audio.output_sample_rate, cfg->audio.output_sample_rate);
+            fmtpLine = fmtpBuf;
+        }
+
         snprintf(fSDPLines, sdpLinesSize,
                  "m=audio 0 RTP/AVP %d\r\n"
                  "c=IN IP4 0.0.0.0\r\n"
-                 "b=AS:64\r\n"
+                 "b=AS:64\r\n" // Assuming bitrate is OK for now
                  "a=rtpmap:%d %s/%u/1\r\n"
+                 "%s" // Placeholder for fmtp line
                  "a=control:%s\r\n"
                  "a=sendonly\r\n",
                  payloadType,
-                 payloadType,
-                 formatName,
-                 frequency,
+                 payloadType, formatName, frequency,
+                 fmtpLine.c_str(),
                  trackId()
          );
 
-        fSDPLines[sdpLinesSize - 1] = '\0';
+        fSDPLines[sdpLinesSize - 1] = '\0'; // Ensure null termination
         LOG_DEBUG("Backchannel SDP: " << fSDPLines);
     }
     return fSDPLines;
 }
 
 MediaSink* BackchannelServerMediaSubsession::createNewStreamDestination(unsigned clientSessionId, unsigned& estBitrate) {
-    estBitrate = 64; // G.711 bitrate
-    LOG_INFO("Creating BackchannelSink for channel: " << static_cast<int>(fFormat));
+    // Estimate bitrate based on format? Opus can be lower.
+    if (fFormat == IMPBackchannelFormat::OPUS) {
+         estBitrate = 32; // Example Opus bitrate
+    } else {
+         estBitrate = 64; // G.711 bitrate
+    }
+    LOG_INFO("Creating BackchannelSink for channel: " << static_cast<int>(fFormat) << " (est bitrate: " << estBitrate << ")");
     return BackchannelSink::createNew(envir(), clientSessionId, fFormat);
 }
 
@@ -114,23 +131,27 @@ RTPSource* BackchannelServerMediaSubsession::createNewRTPSource(Groupsock* rtpGr
     const char* mimeType;
     int payloadType;
     unsigned frequency;
+    unsigned numChannels = 1; // Default to 1 channel
 
     #define APPLY_SOURCE_IF(EnumName, NameString, PayloadType, Frequency, MimeType) \
         if (fFormat == IMPBackchannelFormat::EnumName) { \
             mimeType = MimeType; \
             payloadType = PayloadType; \
             frequency = Frequency; \
+            /* Although SDP rtpmap says /1, the actual source might need /2 if decoder outputs stereo? */ \
+            /* Let's keep this 1 for now as we downmix later */ \
+            /* if (fFormat == IMPBackchannelFormat::OPUS) numChannels = 2; */ \
         }
 
     X_FOREACH_BACKCHANNEL_FORMAT(APPLY_SOURCE_IF)
     #undef APPLY_SOURCE_IF
 
-    LOG_INFO("Creating SimpleRTPSource with payloadType=" << payloadType << ", frequency=" << frequency << ", mimeType=" << mimeType);
+    LOG_INFO("Creating SimpleRTPSource with payloadType=" << payloadType << ", frequency=" << frequency << ", mimeType=" << mimeType << ", numChannels=" << numChannels);
     return SimpleRTPSource::createNew(envir(), rtpGroupsock,
                                       payloadType,
                                       frequency,
                                       mimeType,
-                                      0, // numChannels
+                                      numChannels, // Use determined channel count
                                       False); // allowMultipleFramesPerPacket
 }
 
@@ -147,6 +168,7 @@ Boolean BackchannelServerMediaSubsession::getServerPorts(Port& rtpPort, Port& rt
 }
 
 char const* BackchannelServerMediaSubsession::getAuxSDPLine(RTPSink* /*rtpSink*/, FramedSource* /*inputSource*/) {
+    // Could potentially add fmtp line here instead of sdpLines if needed
     return nullptr;
 }
 

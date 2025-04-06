@@ -246,20 +246,34 @@ bool BackchannelProcessor::writePcmToPipe(const std::vector<int16_t>& pcmBuffer)
 bool BackchannelProcessor::processFrame(const BackchannelFrame& frame) {
     std::vector<int16_t> decoded_pcm;
     if (!decodeFrame(frame.payload.data(), frame.payload.size(), frame.format, decoded_pcm)) {
-        return true;
+        // Error already logged in decodeFrame
+        return true; // Continue processing loop, maybe next frame works
     }
 
+    if (decoded_pcm.empty()) {
+        LOG_DEBUG("decodeFrame returned empty PCM buffer.");
+        return true; // Nothing to process
+    }
+
+    // Decoder output (G711 or Opus) is now guaranteed to be mono.
+    // No downmixing step needed.
+
+    // Resample if necessary
     int input_rate = getFrequency(frame.format);
     int target_rate = cfg->audio.output_sample_rate;
     const std::vector<int16_t>* buffer_to_write = nullptr;
-    std::vector<int16_t> final_pcm;
-    if (input_rate == target_rate) {
-        buffer_to_write = &decoded_pcm;
-    } else {
-        final_pcm = BackchannelProcessor::resampleLinear(decoded_pcm, input_rate, target_rate);
-        buffer_to_write = &final_pcm;
-    }
+    std::vector<int16_t> final_resampled_pcm;
 
+    if (frame.format == IMPBackchannelFormat::OPUS || input_rate == target_rate) {
+        buffer_to_write = &decoded_pcm; // Use the original decoded (mono) buffer
+    } else {
+        // Resample the original decoded (mono) buffer
+        final_resampled_pcm = BackchannelProcessor::resampleLinear(decoded_pcm, input_rate, target_rate);
+        buffer_to_write = &final_resampled_pcm;
+        LOG_DEBUG("Resampled mono frame from " << input_rate << "Hz to " << target_rate << "Hz.");
+    } // Corrected brace placement
+
+    // Write the final (mono, resampled) PCM to the pipe
     if (buffer_to_write != nullptr && !buffer_to_write->empty()) {
         if (!writePcmToPipe(*buffer_to_write)) {
             return false;
