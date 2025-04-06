@@ -369,6 +369,7 @@ void BackchannelProcessor::run() {
 
     LOG_INFO("BackchannelProcessor running...");
 
+    fStream->running = true;
     while (fStream->running) {
         bool continue_loop = true;
         // Atomically check if there are active sessions.

@@ -116,8 +116,9 @@ char const* BackchannelServerMediaSubsession::sdpLines(int /*addressFamily*/) {
 MediaSink* BackchannelServerMediaSubsession::createNewStreamDestination(unsigned clientSessionId, unsigned& estBitrate) {
     estBitrate = 64; // kbps
     LOG_DEBUG("Creating new BackchannelSink for client session " << clientSessionId);
-    // Restore original logic: Call createNew without format/frequency initially
-    return BackchannelSink::createNew(envir(), fStreamData, clientSessionId);
+    // Pass the expected format (PCMA) to the sink constructor
+    IMPBackchannelFormat format = IMPBackchannelFormat::PCMA; // Match the source format
+    return BackchannelSink::createNew(envir(), fStreamData, clientSessionId, format);
 }
 
 RTPSource* BackchannelServerMediaSubsession::createNewRTPSource(Groupsock* rtpGroupsock, unsigned char /*rtpPayloadTypeIfDynamic*/, MediaSink* /*outputSink*/) {

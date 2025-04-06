@@ -1,7 +1,7 @@
 #include "BackchannelStreamState.hpp"
 #include "BackchannelServerMediaSubsession.hpp" // Needed for master definition and fCNAME
 #include "BackchannelSink.hpp"                 // Needed for mediaSink definition
-#include "RTPPacketValidatorFilter.hpp"        // Include the new filter header
+// #include "RTPPacketValidatorFilter.hpp"     // Removed: Filter is no longer used
 #include "Logger.hpp"                          // For logging
 #include <liveMedia.hh>                         // For Live555 classes like Medium, RTCPInstance
 #include <cstring>                              // For memset
@@ -89,33 +89,25 @@ void BackchannelStreamState::startPlaying(BackchannelDestinations* dests, TaskFu
              }
 
              // Hack: Send initial RTCP packet? (From example, might help sync)
-             rtcpInstance->sendReport();
+              rtcpInstance->sendReport();
 
-         } else {
-             LOG_WARN("Failed to create RTCPInstance for client session " << clientSessionId);
+          } else {
+              LOG_WARN("Failed to create RTCPInstance for client session " << clientSessionId);
+      }
+
+      // Removed RTPPacketValidatorFilter creation and connection logic.
+      // Connect the sink directly to the source.
+      LOG_INFO("Connecting BackchannelSink directly to RTPSource for client session " << clientSessionId);
+      if (!mediaSink->startPlaying(*rtpSource, nullptr /*afterPlayingFunc*/, this /*unused clientData*/)) {
+          LOG_ERROR("mediaSink->startPlaying failed (direct connection) for client session " << clientSessionId);
+          // Cleanup RTCP instance if created
+          Medium::close(rtcpInstance); rtcpInstance = nullptr;
+          // Note: No filter to close here
+     } else {
+          LOG_INFO("Connected BackchannelSink directly to RTPSource for client session " << clientSessionId);
      }
-
-     // Create the validator filter, using the RTPSource as its input
-     RTPPacketValidatorFilter* validatorFilter = RTPPacketValidatorFilter::createNew(master.envir(), rtpSource);
-     if (!validatorFilter) {
-         LOG_ERROR("Failed to create RTPPacketValidatorFilter for client session " << clientSessionId);
-         // Cleanup RTCP instance if created
-         Medium::close(rtcpInstance); rtcpInstance = nullptr;
-         return;
-     }
-     LOG_INFO("Created RTPPacketValidatorFilter for client session " << clientSessionId);
-
-     // Connect the validator filter to the sink (start consuming data)
-     // The sink now receives data from the filter, not directly from the source.
-     if (!mediaSink->startPlaying(*validatorFilter, nullptr /*afterPlayingFunc*/, this /*unused clientData*/)) {
-         LOG_ERROR("mediaSink->startPlaying failed (with filter) for client session " << clientSessionId);
-         // Handle error? Maybe close stream? Close the filter?
-         Medium::close(validatorFilter);
-    } else {
-         LOG_INFO("Connected RTPPacketValidatorFilter to BackchannelSink for client session " << clientSessionId);
-    }
-    } else {
-        // Check which pointer is null for better logging
+     } else {
+         // Check which pointer is null for better logging
         if (!mediaSink) LOG_ERROR("Cannot start playing - mediaSink is NULL for client session " << clientSessionId);
         else if (!rtpSource) LOG_ERROR("Cannot start playing - rtpSource is NULL for client session " << clientSessionId);
         else if (!dests) LOG_ERROR("Cannot start playing - dests is NULL for client session " << clientSessionId);

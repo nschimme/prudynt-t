@@ -15,20 +15,20 @@
 
 #define MODULE "BackchannelSink"
 
-const unsigned RTP_HEADER_SIZE = 12; // Base RTP header size without CSRCs
+// const unsigned RTP_HEADER_SIZE = 12; // Removed: No longer assuming RTP header
 
 // Initialize static members
 std::atomic<bool> BackchannelSink::gIsAudioOutputBusy{false}; // Define and initialize static atomic flag
 
-// Reverted createNew signature
+// Updated createNew signature
 BackchannelSink* BackchannelSink::createNew(UsageEnvironment& env, backchannel_stream* stream_data,
-                                            unsigned clientSessionId) {
-    return new BackchannelSink(env, stream_data, clientSessionId);
+                                            unsigned clientSessionId, IMPBackchannelFormat format) {
+    return new BackchannelSink(env, stream_data, clientSessionId, format);
 }
 
-// Reverted constructor signature and initialization list (reordered to match declaration)
+// Updated constructor signature and initialization list
 BackchannelSink::BackchannelSink(UsageEnvironment& env, backchannel_stream* stream_data,
-                                 unsigned clientSessionId)
+                                 unsigned clientSessionId, IMPBackchannelFormat format)
     : MediaSink(env), // Base class constructor
       fRTPSource(nullptr),
       // fReceiveBuffer allocated below
@@ -40,10 +40,10 @@ BackchannelSink::BackchannelSink(UsageEnvironment& env, backchannel_stream* stre
       fHaveAudioOutputLock(false), // Initialize lock state
       fClientSessionId(clientSessionId), // Initialize client session ID
       fTimeoutTask(nullptr),             // Initialize timeout task token
-      fFormat(IMPBackchannelFormat::UNKNOWN) // Initialize format as unknown
+      fFormat(format)                    // Initialize format from constructor argument
       // fFrequency removed
 {
-    LOG_DEBUG("BackchannelSink created for client session " << fClientSessionId); // Removed format/freq log
+    LOG_DEBUG("BackchannelSink created for client session " << fClientSessionId << " with format " << static_cast<int>(fFormat));
     // gettimeofday(&fLastDataTime, nullptr); // Removed: Not needed
     if (fStream == nullptr) {
          LOG_ERROR("backchannel_stream provided to BackchannelSink is null! (Session: " << fClientSessionId << ")"); // Added session ID
@@ -224,95 +224,29 @@ void BackchannelSink::afterGettingFrame1(unsigned frameSize, unsigned numTruncat
         }
     }
 
-    // Process the received frame
+    // Process the received frame (assuming raw audio data, no RTP header)
     if (numTruncatedBytes > 0) {
         LOG_WARN("Received truncated frame (" << frameSize << " bytes, " << numTruncatedBytes << " truncated) for session " << fClientSessionId << ". Discarding."); // Added session ID
-    } else if (frameSize < RTP_HEADER_SIZE) { // Check if frame is large enough for RTP header
-        LOG_WARN("Received frame smaller than RTP header (" << frameSize << " bytes) for session " << fClientSessionId << ". Discarding.");
     } else if (frameSize > 0) {
-        // --- Add Header Logging ---
-        std::stringstream ss;
-        ss << "Received frame (" << frameSize << " bytes) for session " << fClientSessionId << ". Header bytes: ";
-        // Log first 4 bytes (or fewer if frameSize is smaller)
-        unsigned bytesToLog = std::min((unsigned)4, frameSize);
-        for (unsigned i = 0; i < bytesToLog; ++i) {
-            ss << std::hex << std::setw(2) << std::setfill('0') << (int)fReceiveBuffer[i] << " ";
-         }
-         LOG_DEBUG(ss.str());
+        // --- Add Full Frame Logging (Optional) ---
+        // std::stringstream ss_full;
+        // ss_full << "Full frame data (" << frameSize << " bytes): ";
+        // unsigned fullBytesToLog = std::min((unsigned)100, frameSize);
+        // for (unsigned i = 0; i < fullBytesToLog; ++i) {
+        //     ss_full << std::hex << std::setw(2) << std::setfill('0') << (int)fReceiveBuffer[i] << " ";
+        // }
+        // if (frameSize > fullBytesToLog) {
+        //     ss_full << "...";
+        // }
+        // LOG_DEBUG(ss_full.str());
+        // --- End Full Frame Logging ---
 
-         // --- Check for Invalid Header ---
-         if (bytesToLog >= 2 && fReceiveBuffer[0] == 0xFF && fReceiveBuffer[1] == 0xFF) {
-             LOG_ERROR("Detected invalid RTP header starting with FF FF for session " << fClientSessionId << ". Stopping sink.");
-             // Schedule stopPlaying to avoid potential re-entrancy issues
-             envir().taskScheduler().scheduleDelayedTask(0,
-                 (TaskFunc*)[](void* cd) {
-                     BackchannelSink* s = static_cast<BackchannelSink*>(cd);
-                     if (s) s->stopPlaying();
-                 },
-                 this);
-             return; // Stop processing this frame and further frames
-         }
-         // --- End Invalid Header Check ---
-
-         // Valid frame received, manually parse RTP header and create BackchannelFrame
-
-         // --- Add Full Frame Logging ---
-         std::stringstream ss_full;
-         ss_full << "Full frame data (" << frameSize << " bytes): ";
-         // Limit logging for very large frames if necessary, e.g., first 100 bytes
-         unsigned fullBytesToLog = std::min((unsigned)100, frameSize);
-         for (unsigned i = 0; i < fullBytesToLog; ++i) {
-             ss_full << std::hex << std::setw(2) << std::setfill('0') << (int)fReceiveBuffer[i] << " ";
-         }
-         if (frameSize > fullBytesToLog) {
-             ss_full << "...";
-         }
-         LOG_DEBUG(ss_full.str());
-         // --- End Full Frame Logging ---
-
-        // Manually extract Payload Type (PT) from the second byte (index 1)
-        // PT is the lower 7 bits of the second byte.
-        unsigned char payloadType = fReceiveBuffer[1] & 0x7F;
-
-        // Determine format from payload type on the first valid packet
-        if (fFormat == IMPBackchannelFormat::UNKNOWN) {
-            // Use helper function to map RTP PT to our enum
-            fFormat = IMPBackchannel::formatFromRtpPayloadType(payloadType);
-
-            if (fFormat == IMPBackchannelFormat::UNKNOWN) {
-                // Error already logged by helper function
-                // Keep fFormat as UNKNOWN and potentially stop processing? Or just discard this packet?
-                // For now, just discard this packet by returning.
-                // Consider adding logic to tear down the stream if format is unsupported.
-                return; // Skip processing this packet
-            }
-            LOG_INFO("Determined backchannel format for session " << fClientSessionId << " as " << static_cast<int>(fFormat) << " (PT=" << (int)payloadType << ")");
-        }
-
-        // Optionally extract other RTP header fields manually if needed (e.g., timestamp)
-        // uint32_t rtpTimestampNetworkOrder;
-        // memcpy(&rtpTimestampNetworkOrder, fReceiveBuffer + 4, sizeof(uint32_t));
-        // uint32_t rtpTimestamp = ntohl(rtpTimestampNetworkOrder); // Convert from network byte order
-
-        // Calculate presentation time based on RTP timestamp and frequency
-        // Note: presentationTime passed to this function is from Live555's internal clock,
-        // using the RTP timestamp might be more accurate for audio sync if clocks differ.
-        struct timeval frameTimestamp;
-        // TODO: Need a more robust way to map RTP timestamp to struct timeval, potentially
-        // using RTCP SR packets or initial packet arrival time as a reference.
-        // Using presentationTime for now as a fallback, as the calculation based on
-        // rtpTimestamp and fFrequency was complex and potentially inaccurate without
-        // proper clock synchronization handling.
-        frameTimestamp = presentationTime; // Use Live555's presentationTime
-
-        unsigned payloadSize = frameSize - RTP_HEADER_SIZE; // Basic calculation
-        uint8_t* payloadData = fReceiveBuffer + RTP_HEADER_SIZE;
-
+        // Create BackchannelFrame using the entire received data as payload
         BackchannelFrame bcFrame;
-        bcFrame.format = fFormat;                   // Use determined format
+        bcFrame.format = fFormat;                   // Use format passed during construction
         // bcFrame.frequency removed
-        bcFrame.timestamp = frameTimestamp;         // Use presentation timestamp
-        bcFrame.payload.assign(payloadData, payloadData + payloadSize);
+        bcFrame.timestamp = presentationTime;       // Use Live555's presentationTime
+        bcFrame.payload.assign(fReceiveBuffer, fReceiveBuffer + frameSize); // Use entire frame as payload
 
         // Only process/queue if we hold the audio lock
         if (fHaveAudioOutputLock) {

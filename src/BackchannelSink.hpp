@@ -25,9 +25,9 @@ struct BackchannelFrame;   // Forward declaration
 // Inherits from MediaSink as it consumes data from an RTPSource
 class BackchannelSink : public MediaSink {
 public:
-    // Reverted createNew signature (frequency is fixed, format determined from first packet)
+    // Updated createNew signature to accept the expected audio format
     static BackchannelSink* createNew(UsageEnvironment& env, backchannel_stream* stream_data,
-                                      unsigned clientSessionId);
+                                      unsigned clientSessionId, IMPBackchannelFormat format);
 
     // Method to start consuming from the source (now takes FramedSource)
     Boolean startPlaying(FramedSource& source,
@@ -40,9 +40,9 @@ public:
     unsigned getClientSessionId() const;
 
 protected:
-    // Reverted constructor signature (frequency is fixed, format determined from first packet)
+    // Updated constructor signature to accept the expected audio format
     BackchannelSink(UsageEnvironment& env, backchannel_stream* stream_data,
-                    unsigned clientSessionId);
+                    unsigned clientSessionId, IMPBackchannelFormat format);
     virtual ~BackchannelSink();
 
     // --- Required virtual methods from MediaSink ---
@@ -91,7 +91,7 @@ private:
     static const unsigned kAudioDataTimeoutSeconds = 15; // Timeout in seconds
 
     // --- Stored Audio Properties ---
-    IMPBackchannelFormat fFormat;                // Determined audio format (from first packet)
+    const IMPBackchannelFormat fFormat;          // Expected audio format (passed during construction)
     // const unsigned fFrequency = 8000;         // Removed: Use constants from IMPBackchannel.hpp
 };
 
