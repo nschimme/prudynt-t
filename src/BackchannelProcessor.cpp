@@ -77,7 +77,7 @@ std::vector<int16_t> BackchannelProcessor::resampleLinear(const std::vector<int1
 
 bool BackchannelProcessor::initPipe() {
     if (fPipe) {
-        LOG_WARN("Pipe already initialized.");
+        LOG_DEBUG("Pipe already initialized.");
         return true;
     }
     LOG_INFO("Opening pipe to: /bin/iac -s");
@@ -108,7 +108,7 @@ bool BackchannelProcessor::initPipe() {
         return false;
     }
 
-    LOG_INFO("Pipe opened successfully and set to non-blocking (fd=" << fPipeFd << ").");
+    LOG_INFO("Pipe opened successfully (fd=" << fPipeFd << ").");
     return true;
 }
 
@@ -134,7 +134,7 @@ void BackchannelProcessor::closePipe() {
 
 bool BackchannelProcessor::handleIdleState() {
     if (fPipe) {
-        LOG_INFO("No active backchannel sessions, closing pipe.");
+        LOG_INFO("Idle: closing pipe.");
         closePipe();
     }
     BackchannelFrame frame = fStream->inputQueue->wait_read();
@@ -148,7 +148,7 @@ bool BackchannelProcessor::handleIdleState() {
 
 bool BackchannelProcessor::handleActiveState() {
     if (!fPipe) {
-        LOG_INFO("Active backchannel session detected, opening pipe.");
+        LOG_INFO("Active session: opening pipe.");
         if (!initPipe()) {
             LOG_ERROR("Failed to open pipe, cannot process backchannel. Retrying...");
             std::this_thread::sleep_for(std::chrono::seconds(2));
@@ -176,7 +176,7 @@ bool BackchannelProcessor::handleActiveState() {
 bool BackchannelProcessor::decodeFrame(const uint8_t* payload, size_t payloadSize, IMPBackchannelFormat format, std::vector<int16_t>& outPcmBuffer, int& outSampleRate) {
     IMPAudioPalyloadType impPayloadType = mapFormatToImpPayloadType(format);
     if (impPayloadType == PT_MAX) {
-        LOG_WARN("Unsupported BackchannelFormat received: " << static_cast<int>(format));
+        LOG_WARN("Unsupported format received: " << static_cast<int>(format));
         return false;
     }
 
@@ -202,7 +202,7 @@ bool BackchannelProcessor::decodeFrame(const uint8_t* payload, size_t payloadSiz
         if (ret == 0 && stream_out.len > 0 && stream_out.stream != nullptr) {
             size_t num_samples = stream_out.len / sizeof(int16_t);
             if (stream_out.len % sizeof(int16_t) != 0) {
-                LOG_WARN("Decoded stream length (" << stream_out.len << ") not multiple of sizeof(int16_t). Truncating.");
+                LOG_WARN("Decoded stream length (" << stream_out.len << ") not multiple of int16_t size. Truncating.");
             }
             outPcmBuffer.assign(reinterpret_cast<int16_t*>(stream_out.stream),
                               reinterpret_cast<int16_t*>(stream_out.stream) + num_samples);
@@ -217,7 +217,7 @@ bool BackchannelProcessor::decodeFrame(const uint8_t* payload, size_t payloadSiz
             LOG_ERROR("IMP_ADEC_GetStream failed for channel " << adChn << ": " << ret);
             return false;
         } else {
-            LOG_WARN("Success, but no data produced");
+            LOG_DEBUG("ADEC_GetStream succeeded but produced no data.");
             outPcmBuffer.clear();
             outSampleRate = 0;
             return true;
@@ -235,7 +235,7 @@ bool BackchannelProcessor::writePcmToPipe(const std::vector<int16_t>& pcmBuffer)
         return false;
     }
     if (pcmBuffer.empty()) {
-        LOG_WARN("Attempted to write empty PCM buffer to pipe.");
+        LOG_DEBUG("Attempted to write empty PCM buffer to pipe.");
         return true;
     }
 
@@ -255,7 +255,7 @@ bool BackchannelProcessor::writePcmToPipe(const std::vector<int16_t>& pcmBuffer)
         if (saved_errno == EAGAIN || saved_errno == EWOULDBLOCK) {
             auto now = std::chrono::steady_clock::now();
             if (now - fLastPipeFullLogTime > std::chrono::seconds(5)) {
-                LOG_WARN("Backchannel pipe clogged (EAGAIN/EWOULDBLOCK). Discarding PCM chunk.");
+                LOG_DEBUG("Pipe clogged (EAGAIN/EWOULDBLOCK). Discarding PCM chunk.");
                 fLastPipeFullLogTime = now;
             }
             return true;
@@ -294,7 +294,7 @@ bool BackchannelProcessor::processFrame(const BackchannelFrame& frame) {
             buffer_to_write = &final_pcm;
         }
     } else if (!decoded_pcm.empty()) {
-         LOG_WARN("Decoded PCM buffer is not empty, but input sample rate is zero. Cannot resample or write.");
+         LOG_WARN("Decoded PCM not empty, but input sample rate is zero. Cannot process.");
     }
 
     if (buffer_to_write != nullptr && !buffer_to_write->empty()) {
@@ -313,7 +313,7 @@ void BackchannelProcessor::run() {
         return;
     }
 
-    LOG_INFO("BackchannelProcessor running...");
+    LOG_INFO("Processor thread running...");
 
     fStream->running = true;
     while (fStream->running) {
@@ -329,6 +329,6 @@ void BackchannelProcessor::run() {
         }
     }
 
-    LOG_INFO("BackchannelProcessor thread stopping.");
+    LOG_INFO("Processor thread stopping.");
     closePipe();
 }

@@ -14,12 +14,12 @@ BackchannelStreamState::BackchannelStreamState(BackchannelServerMediaSubsession&
       rtpGS(_rtpGS), rtcpGS(_rtcpGS), rtcpInstance(nullptr), clientSessionId(_clientSessionId),
       fReferenceCount(1)
 {
-    LOG_DEBUG("BackchannelStreamState created for client session " << clientSessionId);
+    LOG_DEBUG("Created for session " << clientSessionId);
 }
 
 BackchannelStreamState::~BackchannelStreamState()
 {
-    LOG_DEBUG("BackchannelStreamState destroyed for client session " << clientSessionId);
+    LOG_DEBUG("Destroyed for session " << clientSessionId);
     Medium::close(rtcpInstance);
 
     if (mediaSink && rtpSource) {
@@ -48,7 +48,7 @@ void BackchannelStreamState::startPlaying(BackchannelDestinations* dests, TaskFu
              rtcpInstance->setRRHandler(rtcpRRHandler, rtcpRRHandlerClientData);
 
              if (dests->isTCP) {
-                 LOG_DEBUG("Configuring stream for TCP interleaved mode (socket " << dests->tcpSocketNum << ", RTP ch " << (int)dests->rtpChannelId << ", RTCP ch " << (int)dests->rtcpChannelId << ")");
+                 LOG_DEBUG("Configuring stream for TCP (socket " << dests->tcpSocketNum << ", RTP ch " << (int)dests->rtpChannelId << ", RTCP ch " << (int)dests->rtcpChannelId << ")");
                  rtpSource->setStreamSocket(dests->tcpSocketNum, dests->rtpChannelId, dests->tlsState);
                  rtcpInstance->addStreamSocket(dests->tcpSocketNum, dests->rtcpChannelId, dests->tlsState);
 
@@ -63,7 +63,7 @@ void BackchannelStreamState::startPlaying(BackchannelDestinations* dests, TaskFu
                                                     rtcpRRHandler, rtcpRRHandlerClientData);
 
              } else {
-                 LOG_DEBUG("Configuring stream for UDP mode");
+                 LOG_DEBUG("Configuring stream for UDP");
                  if (rtpGS) rtpGS->addDestination(dests->addr, dests->rtpPort, clientSessionId);
                  if (rtcpGS) rtcpGS->addDestination(dests->addr, dests->rtcpPort, clientSessionId);
                  rtcpInstance->setSpecificRRHandler(dests->addr, dests->rtcpPort,
@@ -73,15 +73,15 @@ void BackchannelStreamState::startPlaying(BackchannelDestinations* dests, TaskFu
               rtcpInstance->sendReport();
 
           } else {
-              LOG_WARN("Failed to create RTCPInstance for client session " << clientSessionId);
+              LOG_WARN("Failed to create RTCPInstance for session " << clientSessionId);
       }
 
-      LOG_INFO("Connecting BackchannelSink directly to RTPSource for client session " << clientSessionId);
+      LOG_INFO("Connecting Sink to Source for session " << clientSessionId);
       if (!mediaSink->startPlaying(*rtpSource, nullptr /*afterPlayingFunc*/, this /*unused clientData*/)) {
           LOG_ERROR("mediaSink->startPlaying failed (direct connection) for client session " << clientSessionId);
           Medium::close(rtcpInstance); rtcpInstance = nullptr;
      } else {
-          LOG_INFO("Connected BackchannelSink directly to RTPSource for client session " << clientSessionId);
+          LOG_INFO("Connected Sink to Source for session " << clientSessionId);
      }
      } else {
         if (!mediaSink) LOG_ERROR("Cannot start playing - mediaSink is NULL for client session " << clientSessionId);

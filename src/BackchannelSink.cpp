@@ -35,23 +35,23 @@ BackchannelSink::BackchannelSink(UsageEnvironment& env, backchannel_stream* stre
       fTimeoutTask(nullptr),
       fFormat(format)
 {
-    LOG_DEBUG("BackchannelSink created for client session " << fClientSessionId << " with format " << static_cast<int>(fFormat));
+    LOG_DEBUG("Sink created for session " << fClientSessionId << " format " << static_cast<int>(fFormat));
     if (fStream == nullptr) {
-         LOG_ERROR("backchannel_stream provided to BackchannelSink is null! (Session: " << fClientSessionId << ")"); // Added session ID
+         LOG_ERROR("backchannel_stream provided to BackchannelSink is null! (Session: " << fClientSessionId << ")");
     } else {
         fInputQueue = fStream->inputQueue.get();
         if (fInputQueue == nullptr) {
-             LOG_ERROR("Input queue within backchannel_stream is null! (Session: " << fClientSessionId << ")"); // Added session ID
+             LOG_ERROR("Input queue within backchannel_stream is null! (Session: " << fClientSessionId << ")");
         }
     }
     fReceiveBuffer = new u_int8_t[kReceiveBufferSize];
     if (fReceiveBuffer == nullptr) {
-        LOG_ERROR("Failed to allocate receive buffer (Session: " << fClientSessionId << ")"); // Added session ID
+        LOG_ERROR("Failed to allocate receive buffer (Session: " << fClientSessionId << ")");
     }
 }
 
 BackchannelSink::~BackchannelSink() {
-    LOG_DEBUG("BackchannelSink destroyed for client session " << fClientSessionId); // Added session ID
+    LOG_DEBUG("Sink destroyed for session " << fClientSessionId);
     stopPlaying();
     delete[] fReceiveBuffer;
 }
@@ -61,7 +61,7 @@ Boolean BackchannelSink::startPlaying(FramedSource& source,
                                       void* afterClientData)
 {
     if (fIsActive) {
-        LOG_WARN("startPlaying called while already active (fIsActive=True) for session " << fClientSessionId << ". This might indicate an issue."); // Added session ID
+        LOG_WARN("startPlaying called while already active for session " << fClientSessionId);
         return False;
     }
 
@@ -73,13 +73,13 @@ Boolean BackchannelSink::startPlaying(FramedSource& source,
 
     if (fStream) {
         int previous_count = fStream->active_sessions.fetch_add(1, std::memory_order_relaxed);
-        LOG_INFO("Backchannel sink starting for session " << fClientSessionId << ". Active sessions: " << previous_count + 1); // Added session ID
+        LOG_INFO("Sink starting for session " << fClientSessionId << ". Active sessions: " << previous_count + 1);
     } else {
-        LOG_ERROR("fStream is null in startPlaying! Cannot increment session count. (Session: " << fClientSessionId << ")"); // Added session ID
+        LOG_ERROR("fStream is null in startPlaying! Cannot increment session count. (Session: " << fClientSessionId << ")");
     }
 
 
-    LOG_INFO("BackchannelSink starting to play/consume from RTPSource for session " << fClientSessionId); // Added session ID
+    LOG_INFO("Sink starting consumption for session " << fClientSessionId);
     return continuePlaying();
 }
 
@@ -88,7 +88,7 @@ void BackchannelSink::stopPlaying() {
         return;
     }
 
-    LOG_INFO("BackchannelSink stopping play/consumption for session " << fClientSessionId); // Added session ID
+    LOG_INFO("Sink stopping consumption for session " << fClientSessionId);
 
     envir().taskScheduler().unscheduleDelayedTask(fTimeoutTask);
     fTimeoutTask = nullptr;
@@ -102,14 +102,14 @@ void BackchannelSink::stopPlaying() {
     if (fHaveAudioOutputLock) {
         gIsAudioOutputBusy.store(false);
         fHaveAudioOutputLock = false;
-        LOG_INFO("BackchannelSink released audio output lock for session " << fClientSessionId << " during stopPlaying."); // Added session ID
+        LOG_INFO("Released audio lock during stopPlaying for session " << fClientSessionId);
     }
 
     if (fStream) {
         int previous_count = fStream->active_sessions.fetch_sub(1, std::memory_order_relaxed);
-        LOG_INFO("Backchannel sink stopped for session " << fClientSessionId << ". Active sessions: " << previous_count - 1); // Added session ID
+        LOG_INFO("Sink stopped for session " << fClientSessionId << ". Active sessions: " << previous_count - 1);
     } else {
-         LOG_ERROR("fStream is null in stopPlaying! Cannot decrement session count. (Session: " << fClientSessionId << ")"); // Added session ID
+         LOG_ERROR("fStream is null in stopPlaying! Cannot decrement session count. (Session: " << fClientSessionId << ")");
     }
 
     if (fAfterFunc != nullptr) {
@@ -163,19 +163,19 @@ void BackchannelSink::afterGettingFrame1(unsigned frameSize, unsigned numTruncat
         bool expected = false;
         if (gIsAudioOutputBusy.compare_exchange_strong(expected, true)) {
             fHaveAudioOutputLock = true;
-            LOG_INFO("BackchannelSink acquired audio output lock for session " << fClientSessionId << " upon receiving first frame."); // Added session ID
+            LOG_INFO("Acquired audio lock on first frame for session " << fClientSessionId);
 
-            LOG_DEBUG("Starting audio data timeout timer for session " << fClientSessionId);
+            LOG_DEBUG("Starting audio timeout timer for session " << fClientSessionId);
             scheduleTimeoutCheck();
 
         } else {
             fHaveAudioOutputLock = false;
-            LOG_WARN("BackchannelSink failed to acquire audio output lock for session " << fClientSessionId << " (already busy). Will receive data but not play."); // Added session ID
+            LOG_WARN("Failed to acquire audio lock (busy) for session " << fClientSessionId << ". Data received but not played.");
         }
     }
 
     if (numTruncatedBytes > 0) {
-        LOG_WARN("Received truncated frame (" << frameSize << " bytes, " << numTruncatedBytes << " truncated) for session " << fClientSessionId << ". Discarding."); // Added session ID
+        LOG_WARN("Received truncated frame (" << frameSize << " bytes, " << numTruncatedBytes << " truncated) for session " << fClientSessionId << ". Discarding.");
     } else if (frameSize > 0) {
 
         BackchannelFrame bcFrame;
@@ -186,10 +186,10 @@ void BackchannelSink::afterGettingFrame1(unsigned frameSize, unsigned numTruncat
         if (fHaveAudioOutputLock) {
             if (fInputQueue) {
                 if (!fInputQueue->write(std::move(bcFrame))) {
-                     LOG_WARN("Backchannel input queue was full for session " << fClientSessionId << ". Oldest frame dropped."); // Added session ID
+                     LOG_WARN("Input queue full for session " << fClientSessionId << ". Frame dropped.");
                 }
             } else {
-                 LOG_ERROR("Input queue is null, cannot queue BackchannelFrame! (Session: " << fClientSessionId << ")"); // Added session ID
+                 LOG_ERROR("Input queue is null, cannot queue BackchannelFrame! (Session: " << fClientSessionId << ")");
             }
         } else {
         }
@@ -231,7 +231,7 @@ void BackchannelSink::timeoutCheck1() {
     LOG_WARN("Audio data timeout detected for session " << fClientSessionId << " (>" << kAudioDataTimeoutSeconds << "s).");
 
     if (fHaveAudioOutputLock) {
-        LOG_WARN("Releasing audio output lock due to audio data timeout for session " << fClientSessionId << ".");
+        LOG_WARN("Releasing audio lock due to timeout for session " << fClientSessionId << ".");
         gIsAudioOutputBusy.store(false);
         fHaveAudioOutputLock = false;
     } else {
@@ -249,7 +249,7 @@ void BackchannelSink::staticOnSourceClosure(void* clientData) {
 }
 
 void BackchannelSink::onSourceClosure1() {
-    LOG_INFO("Source closure detected by BackchannelSink for session " << getClientSessionId());
+    LOG_INFO("Source closure detected for session " << getClientSessionId());
     envir().taskScheduler().scheduleDelayedTask(0,
         (TaskFunc*)[](void* cd) {
             BackchannelSink* s = static_cast<BackchannelSink*>(cd);
