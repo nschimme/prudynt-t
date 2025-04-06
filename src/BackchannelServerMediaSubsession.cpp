@@ -88,8 +88,8 @@ char const* BackchannelServerMediaSubsession::sdpLines(int /*addressFamily*/) {
         std::string fmtpLine = "";
         if (fFormat == IMPBackchannelFormat::OPUS) {
             char fmtpBuf[100];
-            snprintf(fmtpBuf, sizeof(fmtpBuf), 
-                     "a=fmtp:%d stereo=0; ptime=20; maxplaybackrate=%d; sprop-maxcapturerate=%d\r\n", 
+            snprintf(fmtpBuf, sizeof(fmtpBuf),
+                     "a=fmtp:%d stereo=1; maxplaybackrate=%d; sprop-maxcapturerate=%d\r\n",
                      payloadType, cfg->audio.output_sample_rate, cfg->audio.output_sample_rate);
             fmtpLine = fmtpBuf;
         }
@@ -98,12 +98,13 @@ char const* BackchannelServerMediaSubsession::sdpLines(int /*addressFamily*/) {
                  "m=audio 0 RTP/AVP %d\r\n"
                  "c=IN IP4 0.0.0.0\r\n"
                  "b=AS:64\r\n" // Assuming bitrate is OK for now
-                 "a=rtpmap:%d %s/%u/1\r\n"
+                 "a=rtpmap:%d %s/%u/%d\r\n"
                  "%s" // Placeholder for fmtp line
                  "a=control:%s\r\n"
                  "a=sendonly\r\n",
                  payloadType,
                  payloadType, formatName, frequency,
+                 (fFormat == IMPBackchannelFormat::OPUS) ? 2 : 1,
                  fmtpLine.c_str(),
                  trackId()
          );
@@ -131,7 +132,7 @@ RTPSource* BackchannelServerMediaSubsession::createNewRTPSource(Groupsock* rtpGr
     const char* mimeType;
     int payloadType;
     unsigned frequency;
-    unsigned numChannels = 1; // Default to 1 channel
+    unsigned numChannels = 0;
 
     #define APPLY_SOURCE_IF(EnumName, NameString, PayloadType, Frequency, MimeType) \
         if (fFormat == IMPBackchannelFormat::EnumName) { \
@@ -151,7 +152,7 @@ RTPSource* BackchannelServerMediaSubsession::createNewRTPSource(Groupsock* rtpGr
                                       payloadType,
                                       frequency,
                                       mimeType,
-                                      numChannels, // Use determined channel count
+                                      0, // Use determined channel count
                                       False); // allowMultipleFramesPerPacket
 }
 

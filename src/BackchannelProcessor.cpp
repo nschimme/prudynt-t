@@ -255,27 +255,32 @@ bool BackchannelProcessor::processFrame(const BackchannelFrame& frame) {
         return true; // Nothing to process
     }
 
-    // Decoder output (G711 or Opus) is now guaranteed to be mono.
-    // No downmixing step needed.
+    // PCM data in 'decoded_pcm' is now guaranteed to be MONO.
+    // For Opus, it was downmixed in opus_decodeFrm.
+    // For G711, it was already mono.
 
-    // Resample if necessary
+    // Resample ONLY if necessary (i.e., for non-Opus formats if rates differ)
     int input_rate = getFrequency(frame.format);
     int target_rate = cfg->audio.output_sample_rate;
-    const std::vector<int16_t>* buffer_to_write = nullptr;
-    std::vector<int16_t> final_resampled_pcm;
+    const std::vector<int16_t>* buffer_to_write = &decoded_pcm; // Default to using the decoded buffer
+    std::vector<int16_t> resampled_pcm; // Only used if resampling occurs
 
-    if (frame.format == IMPBackchannelFormat::OPUS || input_rate == target_rate) {
-        buffer_to_write = &decoded_pcm; // Use the original decoded (mono) buffer
-    } else {
-        // Resample the original decoded (mono) buffer
-        final_resampled_pcm = BackchannelProcessor::resampleLinear(decoded_pcm, input_rate, target_rate);
-        buffer_to_write = &final_resampled_pcm;
+    if (frame.format != IMPBackchannelFormat::OPUS && input_rate != target_rate) {
+        // Resample the original decoded (mono) buffer for non-Opus formats
+        resampled_pcm = BackchannelProcessor::resampleLinear(decoded_pcm, input_rate, target_rate);
+        buffer_to_write = &resampled_pcm; // Point to the resampled buffer
         LOG_DEBUG("Resampled mono frame from " << input_rate << "Hz to " << target_rate << "Hz.");
-    } // Corrected brace placement
+    } else {
+        // For Opus, or if rates match, use the decoded buffer directly.
+        // No resampling needed. Opus decoder already outputs at target_rate.
+        LOG_DEBUG("Using decoded mono frame directly (Format: " << (int)frame.format << ", Rate: " << input_rate << "Hz).");
+    }
 
-    // Write the final (mono, resampled) PCM to the pipe
+    // Write the final mono PCM (resampled if needed) to the pipe
     if (buffer_to_write != nullptr && !buffer_to_write->empty()) {
+        LOG_DEBUG("Writing " << buffer_to_write->size() << " mono samples (" << buffer_to_write->size() * sizeof(int16_t) << " bytes) to pipe...");
         if (!writePcmToPipe(*buffer_to_write)) {
+            // Error writing to pipe, likely closed. Stop processing loop.
             return false;
         }
     }

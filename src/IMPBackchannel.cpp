@@ -29,15 +29,15 @@ static int opus_openDecoder(void *pvoidDecoderAttr, void *pDecoder) {
     }
 
     const int sample_rate = cfg->audio.output_sample_rate;
-    const int channels = 1; // Set back to Mono
+    const int channels = 2; // Create a STEREO decoder as input is stereo
     int error;
     tl_opusDecoder = opus_decoder_create(sample_rate, channels, &error);
     if (error != OPUS_OK || !tl_opusDecoder) {
-        LOG_ERROR("Failed to create Opus mono decoder for this thread: " << opus_strerror(error)); // Update log
-        tl_opusDecoder = nullptr; 
+        LOG_ERROR("Failed to create Opus stereo decoder for this thread: " << opus_strerror(error)); // Update log
+        tl_opusDecoder = nullptr;
         return -1; // Indicate failure
     }
-    LOG_DEBUG("Thread-local Opus MONO decoder opened successfully"); // Update log
+    LOG_DEBUG("Thread-local Opus STEREO decoder opened successfully (will downmix to mono)"); // Update log
     return 0; // Indicate success
 }
 
@@ -55,18 +55,37 @@ static int opus_decodeFrm(void *pDecoder, unsigned char *pu8Inbuf, int s32InLen,
      }
 
     const int max_frame_size_per_channel = cfg->audio.output_sample_rate * 120 / 1000;
-    const int channels = 1; // Expect Mono output from decoder
-    // Decode into the output buffer using the thread-local instance.
-    int frame_size_samples_per_channel = opus_decode(tl_opusDecoder, pu8Inbuf, s32InLen, (opus_int16 *)pu16Outbuf, max_frame_size_per_channel, 1);
+    const int input_channels = 2; // Decoder expects stereo input
+    const int output_channels = 1; // We will output mono
+
+    // Allocate a temporary buffer for stereo decoding
+    // Max possible stereo samples = max_frame_size_per_channel * input_channels
+    opus_int16 temp_stereo_buffer[max_frame_size_per_channel * input_channels];
+
+    // Log the input size before decoding
+    LOG_DEBUG("opus_decodeFrm: Attempting to decode Opus frame with input size (s32InLen): " << s32InLen);
+
+    // Decode the stereo Opus data into the temporary buffer
+    int frame_size_samples_per_channel = opus_decode(tl_opusDecoder, pu8Inbuf, s32InLen, temp_stereo_buffer, max_frame_size_per_channel, 0);
 
     if (frame_size_samples_per_channel < 0) {
-        LOG_ERROR("Thread-local Opus (mono) decode failed: " << opus_strerror(frame_size_samples_per_channel)); // Update log
+        LOG_ERROR("Thread-local Opus (stereo) decode failed for input size " << s32InLen << ": " << opus_strerror(frame_size_samples_per_channel)); // Update log with input size
         *ps32OutLen = 0;
         return -1; // Indicate failure
     }
 
-    // Output length is samples_per_channel * num_channels * bytes_per_sample
-    *ps32OutLen = frame_size_samples_per_channel * channels * sizeof(opus_int16);
+    // Downmix stereo to mono into the final output buffer (pu16Outbuf)
+    opus_int16* out_ptr = (opus_int16*)pu16Outbuf;
+    for (int i = 0; i < frame_size_samples_per_channel; ++i) {
+        // Average Left and Right channels: (L + R) / 2
+        // Use wider type for intermediate sum to prevent overflow
+        int32_t left = temp_stereo_buffer[i * input_channels];
+        int32_t right = temp_stereo_buffer[i * input_channels + 1];
+        out_ptr[i] = static_cast<opus_int16>((left + right) / 2);
+    }
+
+    // Output length is mono_samples * num_output_channels * bytes_per_sample
+    *ps32OutLen = frame_size_samples_per_channel * output_channels * sizeof(opus_int16);
 
     return 0; // Indicate success
 }
