@@ -2,6 +2,7 @@
 #include "BackchannelSink.hpp"
 #include "Logger.hpp"
 #include "globals.hpp"
+#include "Config.hpp"
 #include "IMPBackchannel.hpp"
 
 #include <NetAddress.hh>
@@ -65,39 +66,74 @@ char const* BackchannelServerMediaSubsession::sdpLines(int /*addressFamily*/) {
         fSDPLines = new char[sdpLinesSize];
         if (fSDPLines == nullptr) return nullptr;
 
+        // Determine format from config
+        const char* formatName = "PCMU";
+        int payloadType = 0;
+        unsigned frequency = 8000;
+        if (strcmp(cfg->audio.output_format, "G711A") == 0) {
+            formatName = "PCMA";
+            payloadType = 8;
+        } else if (strcmp(cfg->audio.output_format, "G711U") != 0) {
+            LOG_WARN("Unknown audio.output_format: " << cfg->audio.output_format << ". Defaulting to G711U.");
+        }
+
         snprintf(fSDPLines, sdpLinesSize,
                  "m=audio 0 RTP/AVP %d\r\n"
                  "c=IN IP4 0.0.0.0\r\n"
                  "b=AS:64\r\n"
-                  "a=rtpmap:%d PCMA/%u/1\r\n"
-                  "a=control:%s\r\n"
-                  "a=sendonly\r\n",
-                  (global_backchannel && global_backchannel->imp_backchannel) ? global_backchannel->imp_backchannel->rtpPayloadTypeFromFormat(IMPBackchannelFormat::PCMA) : 8,
-                  (global_backchannel && global_backchannel->imp_backchannel) ? global_backchannel->imp_backchannel->rtpPayloadTypeFromFormat(IMPBackchannelFormat::PCMA) : 8,
-                  (global_backchannel && global_backchannel->imp_backchannel) ? global_backchannel->imp_backchannel->getFrequency(IMPBackchannelFormat::PCMA) : 8000,
-                  trackId()
+                 "a=rtpmap:%d %s/%u/1\r\n"
+                 "a=control:%s\r\n"
+                 "a=sendonly\r\n",
+                 payloadType,
+                 payloadType,
+                 formatName,
+                 frequency,
+                 trackId()
          );
 
         fSDPLines[sdpLinesSize - 1] = '\0';
+        LOG_DEBUG("Backchannel SDP: " << fSDPLines);
     }
     return fSDPLines;
 }
 
 MediaSink* BackchannelServerMediaSubsession::createNewStreamDestination(unsigned clientSessionId, unsigned& estBitrate) {
-    estBitrate = 64;
+    estBitrate = 64; // G.711 bitrate
     LOG_DEBUG("Creating new Sink for session " << clientSessionId);
-    IMPBackchannelFormat format = IMPBackchannelFormat::PCMA;
+
+    // Determine format from config
+    IMPBackchannelFormat format = IMPBackchannelFormat::PCMU;
+    if (strcmp(cfg->audio.output_format, "G711A") == 0) {
+        format = IMPBackchannelFormat::PCMA;
+    } else if (strcmp(cfg->audio.output_format, "G711U") != 0) {
+        LOG_WARN("Unknown audio.output_format in createNewStreamDestination: " << cfg->audio.output_format << ". Defaulting to G711U/PCMA.");
+    }
+
+    LOG_INFO("Creating BackchannelSink with format: " << cfg->audio.output_format);
     return BackchannelSink::createNew(envir(), clientSessionId, format);
 }
 
 RTPSource* BackchannelServerMediaSubsession::createNewRTPSource(Groupsock* rtpGroupsock, unsigned char /*rtpPayloadTypeIfDynamic*/, MediaSink* /*outputSink*/) {
     LOG_DEBUG("Creating new RTPSource");
-     return SimpleRTPSource::createNew(envir(), rtpGroupsock,
-                                       (global_backchannel && global_backchannel->imp_backchannel) ? global_backchannel->imp_backchannel->rtpPayloadTypeFromFormat(IMPBackchannelFormat::PCMA) : 8,
-                                       (global_backchannel && global_backchannel->imp_backchannel) ? global_backchannel->imp_backchannel->getFrequency(IMPBackchannelFormat::PCMA) : 8000,
-                                       "audio/PCMA",
-                                       0,
-                                       False);
+
+    // Determine format from config
+    const char* mimeType = "audio/PCMA";
+    int payloadType = 0;
+    unsigned frequency = 8000;
+    if (strcmp(cfg->audio.output_format, "G711A") == 0) {
+        mimeType = "audio/PCMA";
+        payloadType = 8;
+    } else if (strcmp(cfg->audio.output_format, "G711U") != 0) {
+        LOG_WARN("Unknown audio.output_format: " << cfg->audio.output_format << ". Defaulting to G711U.");
+    }
+
+    LOG_INFO("Creating SimpleRTPSource with payloadType=" << payloadType << ", frequency=" << frequency << ", mimeType=" << mimeType);
+    return SimpleRTPSource::createNew(envir(), rtpGroupsock,
+                                      payloadType,
+                                      frequency,
+                                      mimeType,
+                                      0, // numChannels
+                                      False); // allowMultipleFramesPerPacket
 }
 
 Boolean BackchannelServerMediaSubsession::getServerPorts(Port& rtpPort, Port& rtcpPort) {
