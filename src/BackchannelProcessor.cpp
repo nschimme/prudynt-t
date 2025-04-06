@@ -23,13 +23,9 @@ IMPAudioPalyloadType BackchannelProcessor::mapFormatToImpPayloadType(IMPBackchan
     }
 }
 
-BackchannelProcessor::BackchannelProcessor(backchannel_stream* stream_data)
-    : fStream(stream_data), fPipe(nullptr), fPipeFd(-1), fLastPipeFullLogTime(std::chrono::steady_clock::time_point::min())
+BackchannelProcessor::BackchannelProcessor()
+    : fPipe(nullptr), fPipeFd(-1), fLastPipeFullLogTime(std::chrono::steady_clock::time_point::min())
 {
-    if (fStream == nullptr) {
-        LOG_ERROR("backchannel_stream data provided to BackchannelProcessor is null!");
-        assert(false);
-    }
 }
 
 BackchannelProcessor::~BackchannelProcessor() {
@@ -137,9 +133,10 @@ bool BackchannelProcessor::handleIdleState() {
         LOG_INFO("Idle: closing pipe.");
         closePipe();
     }
-    BackchannelFrame frame = fStream->inputQueue->wait_read();
+    if (!global_backchannel) return false;
+    BackchannelFrame frame = global_backchannel->inputQueue->wait_read();
 
-    if (!fStream->running) {
+    if (!global_backchannel->running) {
         return false;
     }
 
@@ -156,9 +153,10 @@ bool BackchannelProcessor::handleActiveState() {
         }
     }
 
-    BackchannelFrame frame = fStream->inputQueue->wait_read();
+    if (!global_backchannel) return false;
+    BackchannelFrame frame = global_backchannel->inputQueue->wait_read();
 
-    if (!fStream->running) {
+    if (!global_backchannel->running) {
         return false;
     }
 
@@ -181,7 +179,8 @@ bool BackchannelProcessor::decodeFrame(const uint8_t* payload, size_t payloadSiz
     }
 
     if (impPayloadType == PT_G711A || impPayloadType == PT_G711U) {
-        int adChn = IMPBackchannel::getADECChannel(format);
+        if (!global_backchannel || !global_backchannel->imp_backchannel) return false;
+        int adChn = global_backchannel->imp_backchannel->getADECChannel(format);
         if (adChn < 0) {
             LOG_WARN("No ADEC channel ready for format: " << static_cast<int>(format));
             return false;
@@ -207,7 +206,8 @@ bool BackchannelProcessor::decodeFrame(const uint8_t* payload, size_t payloadSiz
             outPcmBuffer.assign(reinterpret_cast<int16_t*>(stream_out.stream),
                               reinterpret_cast<int16_t*>(stream_out.stream) + num_samples);
             IMP_ADEC_ReleaseStream(adChn, &stream_out);
-            outSampleRate = IMPBackchannel::getFrequency(format);
+            if (!global_backchannel || !global_backchannel->imp_backchannel) return false;
+            outSampleRate = global_backchannel->imp_backchannel->getFrequency(format);
             if (outSampleRate == 0) {
                  LOG_ERROR("Failed to get frequency for format: " << static_cast<int>(format));
                  return false;
@@ -308,17 +308,17 @@ bool BackchannelProcessor::processFrame(const BackchannelFrame& frame) {
 
 
 void BackchannelProcessor::run() {
-    if (!fStream) {
-        LOG_ERROR("Cannot run BackchannelProcessor: stream data is null.");
+    if (!global_backchannel) {
+        LOG_ERROR("Cannot run BackchannelProcessor: global_backchannel is null.");
         return;
     }
 
     LOG_INFO("Processor thread running...");
 
-    fStream->running = true;
-    while (fStream->running) {
+    global_backchannel->running = true;
+    while (global_backchannel->running) {
         bool continue_loop = true;
-        if (fStream->active_sessions.load(std::memory_order_relaxed) == 0) {
+        if (global_backchannel->active_sessions.load(std::memory_order_relaxed) == 0) {
             continue_loop = handleIdleState();
         } else {
             continue_loop = handleActiveState();

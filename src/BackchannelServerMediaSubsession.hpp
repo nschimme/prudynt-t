@@ -25,7 +25,7 @@ class MediaSink;
  class BackchannelServerMediaSubsession : public ServerMediaSubsession {
  friend class BackchannelStreamState;
  public:
-     static BackchannelServerMediaSubsession* createNew(UsageEnvironment& env, backchannel_stream* stream_data, Boolean reuseFirstSource = False);
+     static BackchannelServerMediaSubsession* createNew(UsageEnvironment& env, Boolean reuseFirstSource = False);
 
      virtual ~BackchannelServerMediaSubsession();
 
@@ -34,7 +34,7 @@ public:
     virtual void closeStreamSink(MediaSink *outputSink);
 
  protected:
-     BackchannelServerMediaSubsession(UsageEnvironment& env, backchannel_stream* stream_data, Boolean reuseFirstSource);
+     BackchannelServerMediaSubsession(UsageEnvironment& env, Boolean reuseFirstSource);
 
     virtual char const* sdpLines(int addressFamily);
     virtual void getStreamParameters(unsigned clientSessionId,
@@ -69,7 +69,6 @@ public:
 
 private:
     char* fSDPLines = nullptr;
-    backchannel_stream* fStreamData;
      HashTable* fDestinationsHashTable;
      char fCNAME[MAX_CNAME_LEN+1];
      void* fLastStreamToken;

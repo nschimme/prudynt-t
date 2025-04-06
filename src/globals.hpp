@@ -138,16 +138,23 @@ struct video_stream
  // Structure for Backchannel Processing State
  struct backchannel_stream
  {
-     // Changed MsgChannel type to use the new BackchannelFrame struct
      std::shared_ptr<MsgChannel<BackchannelFrame>> inputQueue;
+     IMPBackchannel* imp_backchannel;
+     std::atomic<bool> running;
      pthread_t thread;
-     std::atomic<bool> running; // Controls thread lifetime
-     std::atomic<int> active_sessions{0}; // Counter for active client sessions
-     std::binary_semaphore has_started{0}; // For startup synchronization
+     std::atomic<int> active_sessions{0};
+     std::binary_semaphore has_started{0};
+
 
      backchannel_stream()
-         : inputQueue(std::make_shared<MsgChannel<BackchannelFrame>>(BACKCHANNEL_QUEUE_SIZE)), // Updated type
+         : inputQueue(std::make_shared<MsgChannel<BackchannelFrame>>(BACKCHANNEL_QUEUE_SIZE)),
+           imp_backchannel(new IMPBackchannel()),
            running(false) {}
+
+     ~backchannel_stream() { // Destructor to clean up
+         delete imp_backchannel;
+         imp_backchannel = nullptr;
+     }
  };
 
 

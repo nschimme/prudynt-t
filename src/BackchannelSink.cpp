@@ -16,17 +16,15 @@
 
 std::atomic<bool> BackchannelSink::gIsAudioOutputBusy{false};
 
-BackchannelSink* BackchannelSink::createNew(UsageEnvironment& env, backchannel_stream* stream_data,
+BackchannelSink* BackchannelSink::createNew(UsageEnvironment& env,
                                             unsigned clientSessionId, IMPBackchannelFormat format) {
-    return new BackchannelSink(env, stream_data, clientSessionId, format);
+    return new BackchannelSink(env, clientSessionId, format);
 }
 
-BackchannelSink::BackchannelSink(UsageEnvironment& env, backchannel_stream* stream_data,
+BackchannelSink::BackchannelSink(UsageEnvironment& env,
                                  unsigned clientSessionId, IMPBackchannelFormat format)
     : MediaSink(env),
       fRTPSource(nullptr),
-      fStream(stream_data),
-      fInputQueue(nullptr),
       fIsActive(False),
       fAfterFunc(nullptr),
       fAfterClientData(nullptr),
@@ -36,14 +34,6 @@ BackchannelSink::BackchannelSink(UsageEnvironment& env, backchannel_stream* stre
       fFormat(format)
 {
     LOG_DEBUG("Sink created for session " << fClientSessionId << " format " << static_cast<int>(fFormat));
-    if (fStream == nullptr) {
-         LOG_ERROR("backchannel_stream provided to BackchannelSink is null! (Session: " << fClientSessionId << ")");
-    } else {
-        fInputQueue = fStream->inputQueue.get();
-        if (fInputQueue == nullptr) {
-             LOG_ERROR("Input queue within backchannel_stream is null! (Session: " << fClientSessionId << ")");
-        }
-    }
     fReceiveBuffer = new u_int8_t[kReceiveBufferSize];
     if (fReceiveBuffer == nullptr) {
         LOG_ERROR("Failed to allocate receive buffer (Session: " << fClientSessionId << ")");
@@ -71,11 +61,11 @@ Boolean BackchannelSink::startPlaying(FramedSource& source,
     fHaveAudioOutputLock = false;
     fIsActive = True;
 
-    if (fStream) {
-        int previous_count = fStream->active_sessions.fetch_add(1, std::memory_order_relaxed);
+    if (global_backchannel) {
+        int previous_count = global_backchannel->active_sessions.fetch_add(1, std::memory_order_relaxed);
         LOG_INFO("Sink starting for session " << fClientSessionId << ". Active sessions: " << previous_count + 1);
     } else {
-        LOG_ERROR("fStream is null in startPlaying! Cannot increment session count. (Session: " << fClientSessionId << ")");
+        LOG_ERROR("global_backchannel is null in startPlaying! Cannot increment session count. (Session: " << fClientSessionId << ")");
     }
 
 
@@ -105,11 +95,11 @@ void BackchannelSink::stopPlaying() {
         LOG_INFO("Released audio lock during stopPlaying for session " << fClientSessionId);
     }
 
-    if (fStream) {
-        int previous_count = fStream->active_sessions.fetch_sub(1, std::memory_order_relaxed);
+    if (global_backchannel) {
+        int previous_count = global_backchannel->active_sessions.fetch_sub(1, std::memory_order_relaxed);
         LOG_INFO("Sink stopped for session " << fClientSessionId << ". Active sessions: " << previous_count - 1);
     } else {
-         LOG_ERROR("fStream is null in stopPlaying! Cannot decrement session count. (Session: " << fClientSessionId << ")");
+         LOG_ERROR("global_backchannel is null in stopPlaying! Cannot decrement session count. (Session: " << fClientSessionId << ")");
     }
 
     if (fAfterFunc != nullptr) {
@@ -184,12 +174,12 @@ void BackchannelSink::afterGettingFrame1(unsigned frameSize, unsigned numTruncat
         bcFrame.payload.assign(fReceiveBuffer, fReceiveBuffer + frameSize);
 
         if (fHaveAudioOutputLock) {
-            if (fInputQueue) {
-                if (!fInputQueue->write(std::move(bcFrame))) {
+            if (global_backchannel && global_backchannel->inputQueue) {
+                if (!global_backchannel->inputQueue->write(std::move(bcFrame))) {
                      LOG_WARN("Input queue full for session " << fClientSessionId << ". Frame dropped.");
                 }
             } else {
-                 LOG_ERROR("Input queue is null, cannot queue BackchannelFrame! (Session: " << fClientSessionId << ")");
+                 LOG_ERROR("global_backchannel or its input queue is null, cannot queue BackchannelFrame! (Session: " << fClientSessionId << ")");
             }
         } else {
         }

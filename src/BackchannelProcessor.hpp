@@ -10,7 +10,7 @@
 
 class BackchannelProcessor {
 public:
-    BackchannelProcessor(backchannel_stream* stream_data);
+    BackchannelProcessor();
     ~BackchannelProcessor();
 
     void run();
@@ -30,7 +30,6 @@ private:
     bool decodeFrame(const uint8_t* payload, size_t payloadSize, IMPBackchannelFormat format, std::vector<int16_t>& outPcmBuffer, int& outSampleRate);
     bool writePcmToPipe(const std::vector<int16_t>& pcmBuffer);
 
-    backchannel_stream* fStream;
     FILE* fPipe;
     int fPipeFd;
     std::chrono::steady_clock::time_point fLastPipeFullLogTime;

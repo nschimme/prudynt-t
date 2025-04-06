@@ -11,7 +11,7 @@
 #include "globals.hpp"
 #include "IMPSystem.hpp"
 #include "Motion.hpp"
-#include "IMPBackchannel.hpp" // Needed for static init/deinit
+#include "IMPBackchannel.hpp"
 using namespace std::chrono;
 
 std::mutex mutex_main;
@@ -115,10 +115,7 @@ int main(int argc, const char *argv[])
     {
 #if defined(AUDIO_SUPPORT)
         if (cfg->audio.output_enabled && (global_restart_audio || startup)) {
-             int ret = IMPBackchannel::init();
-             LOG_DEBUG_OR_ERROR(ret, "create backchannel resources");
-
-             ret = pthread_create(&backchannel_thread, nullptr, Worker::backchannel_processor, global_backchannel.get());
+             int ret = pthread_create(&backchannel_thread, nullptr, Worker::backchannel_processor, nullptr);
              LOG_DEBUG_OR_ERROR(ret, "create backchannel processor thread");
              // wait for initialization done (pipe opened)
              global_backchannel->has_started.acquire();

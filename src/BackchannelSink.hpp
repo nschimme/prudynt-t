@@ -21,7 +21,7 @@ struct BackchannelFrame;
 
 class BackchannelSink : public MediaSink {
 public:
-    static BackchannelSink* createNew(UsageEnvironment& env, backchannel_stream* stream_data,
+    static BackchannelSink* createNew(UsageEnvironment& env,
                                       unsigned clientSessionId, IMPBackchannelFormat format);
 
     Boolean startPlaying(FramedSource& source,
@@ -32,7 +32,7 @@ public:
     unsigned getClientSessionId() const;
 
 protected:
-    BackchannelSink(UsageEnvironment& env, backchannel_stream* stream_data,
+    BackchannelSink(UsageEnvironment& env,
                     unsigned clientSessionId, IMPBackchannelFormat format);
     virtual ~BackchannelSink();
 
@@ -56,8 +56,6 @@ private:
     FramedSource* fRTPSource;
     u_int8_t* fReceiveBuffer;
     static const unsigned kReceiveBufferSize = 2048;
-    backchannel_stream* fStream;
-    MsgChannel<BackchannelFrame>* fInputQueue;
 
     Boolean fIsActive;
     MediaSink::afterPlayingFunc* fAfterFunc;

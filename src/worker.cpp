@@ -860,24 +860,15 @@ void *Worker::watch_config_poll(void *arg)
 void *Worker::backchannel_processor(void *arg)
 {
     LOG_INFO("Backchannel processor thread starting...");
-    backchannel_stream* stream = static_cast<backchannel_stream*>(arg);
 
-    if (!stream) {
-        LOG_ERROR("Backchannel processor thread received null argument. Exiting.");
+    if (!global_backchannel) {
+        LOG_ERROR("global_backchannel is null. Backchannel processor cannot start. Exiting.");
         return nullptr;
     }
 
-    // Create the processor instance
-    BackchannelProcessor processor(stream);
-
-    // Signal that initialization (up to this point) is done
-    // Note: processor.run() opens the pipe, which might fail.
-    // Consider moving has_started.release() after successful pipe open in processor.run()?
-    // For now, keep it here as per other worker patterns.
-    stream->has_started.release();
-
-    // Run the processor's main loop
-    processor.run(); // This blocks until stream->running is false or an error occurs
+    BackchannelProcessor processor;
+    global_backchannel->has_started.release();
+    processor.run();
 
     LOG_INFO("Backchannel processor thread finished.");
     return nullptr;

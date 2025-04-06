@@ -25,21 +25,17 @@ static void delayedDeleteTask(void* clientData) {
     delete state;
 }
 
-
-BackchannelServerMediaSubsession* BackchannelServerMediaSubsession::createNew(UsageEnvironment& env, backchannel_stream* stream_data, Boolean reuseFirstSource) {
-    return new BackchannelServerMediaSubsession(env, stream_data, reuseFirstSource);
+BackchannelServerMediaSubsession* BackchannelServerMediaSubsession::createNew(UsageEnvironment& env, Boolean reuseFirstSource) {
+    return new BackchannelServerMediaSubsession(env, reuseFirstSource);
 }
 
-BackchannelServerMediaSubsession::BackchannelServerMediaSubsession(UsageEnvironment& env, backchannel_stream* stream_data, Boolean reuseFirstSource)
-    : ServerMediaSubsession(env), fSDPLines(nullptr), fStreamData(stream_data),
+BackchannelServerMediaSubsession::BackchannelServerMediaSubsession(UsageEnvironment& env, Boolean reuseFirstSource)
+    : ServerMediaSubsession(env), fSDPLines(nullptr), /* fStreamData removed */
       fLastStreamToken(nullptr), fReuseFirstSource(reuseFirstSource),
       fInitialPortNum(6970), fMultiplexRTCPWithRTP(False)
 {
     LOG_DEBUG("Subsession created");
     fDestinationsHashTable = HashTable::create(ONE_WORD_HASH_KEYS);
-    if (fStreamData == nullptr) {
-        LOG_WARN("backchannel_stream data provided is null!");
-    }
     gethostname(fCNAME, MAX_CNAME_LEN);
     fCNAME[MAX_CNAME_LEN] = '\0';
 
@@ -76,8 +72,9 @@ char const* BackchannelServerMediaSubsession::sdpLines(int /*addressFamily*/) {
                   "a=rtpmap:%d PCMA/%u/1\r\n"
                   "a=control:%s\r\n"
                   "a=sendonly\r\n",
-                  IMPBackchannel::rtpPayloadTypeFromFormat(IMPBackchannelFormat::PCMA),
-                  IMPBackchannel::rtpPayloadTypeFromFormat(IMPBackchannelFormat::PCMA), IMPBackchannel::getFrequency(IMPBackchannelFormat::PCMA),
+                  (global_backchannel && global_backchannel->imp_backchannel) ? global_backchannel->imp_backchannel->rtpPayloadTypeFromFormat(IMPBackchannelFormat::PCMA) : 8,
+                  (global_backchannel && global_backchannel->imp_backchannel) ? global_backchannel->imp_backchannel->rtpPayloadTypeFromFormat(IMPBackchannelFormat::PCMA) : 8,
+                  (global_backchannel && global_backchannel->imp_backchannel) ? global_backchannel->imp_backchannel->getFrequency(IMPBackchannelFormat::PCMA) : 8000,
                   trackId()
          );
 
@@ -90,14 +87,14 @@ MediaSink* BackchannelServerMediaSubsession::createNewStreamDestination(unsigned
     estBitrate = 64;
     LOG_DEBUG("Creating new Sink for session " << clientSessionId);
     IMPBackchannelFormat format = IMPBackchannelFormat::PCMA;
-    return BackchannelSink::createNew(envir(), fStreamData, clientSessionId, format);
+    return BackchannelSink::createNew(envir(), clientSessionId, format);
 }
 
 RTPSource* BackchannelServerMediaSubsession::createNewRTPSource(Groupsock* rtpGroupsock, unsigned char /*rtpPayloadTypeIfDynamic*/, MediaSink* /*outputSink*/) {
     LOG_DEBUG("Creating new RTPSource");
      return SimpleRTPSource::createNew(envir(), rtpGroupsock,
-                                       IMPBackchannel::rtpPayloadTypeFromFormat(IMPBackchannelFormat::PCMA),
-                                       IMPBackchannel::getFrequency(IMPBackchannelFormat::PCMA),
+                                       (global_backchannel && global_backchannel->imp_backchannel) ? global_backchannel->imp_backchannel->rtpPayloadTypeFromFormat(IMPBackchannelFormat::PCMA) : 8,
+                                       (global_backchannel && global_backchannel->imp_backchannel) ? global_backchannel->imp_backchannel->getFrequency(IMPBackchannelFormat::PCMA) : 8000,
                                        "audio/PCMA",
                                        0,
                                        False);

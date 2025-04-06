@@ -1,6 +1,4 @@
 #include "IMPBackchannel.hpp"
-#include "BackchannelServerMediaSubsession.hpp"
-#include "BackchannelSink.hpp"
 #include "globals.hpp"
 #include <cstring>
 
@@ -8,6 +6,14 @@
 
 std::map<IMPBackchannelFormat, int> IMPBackchannel::adecChannels;
 bool IMPBackchannel::decoderInitialized = false;
+
+IMPBackchannel::IMPBackchannel() {
+    init();
+}
+
+IMPBackchannel::~IMPBackchannel() {
+    deinit();
+}
 
 int IMPBackchannel::init() {
     if (decoderInitialized) {
@@ -86,7 +92,6 @@ int IMPBackchannel::getADECChannel(IMPBackchannelFormat format) {
     return it->second;
 }
 
-
 unsigned IMPBackchannel::getFrequency(IMPBackchannelFormat format) {
     switch (format) {
         case IMPBackchannelFormat::PCMU: return IMP_BACKCHANNEL_FREQ_PCMU;
@@ -115,25 +120,4 @@ int IMPBackchannel::rtpPayloadTypeFromFormat(IMPBackchannelFormat format) {
             LOG_WARN("Mapping unknown format to RTP payload type: " << static_cast<int>(format));
             return -1;
     }
-}
-
-
-BackchannelServerMediaSubsession* IMPBackchannel::createNewSubsession(UsageEnvironment& env) {
-    LOG_DEBUG("Creating backchannel subsession and sink...");
-
-    if (!global_backchannel) {
-         LOG_ERROR("global_backchannel not initialized!");
-         return nullptr;
-     }
-
-     // Sink is created internally by BackchannelServerMediaSubsession
-
-     BackchannelServerMediaSubsession* subsession = BackchannelServerMediaSubsession::createNew(env, global_backchannel.get());
-     if (!subsession) {
-         LOG_ERROR("Failed to create BackchannelServerMediaSubsession!");
-         return nullptr;
-     }
-
-     LOG_INFO("Backchannel subsession created successfully.");
-    return subsession;
 }

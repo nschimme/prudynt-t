@@ -74,22 +74,18 @@ void RTSP::addSubsession(int chnNr, _stream &stream)
     sms->addSubsession(sub);
 
 #if defined(AUDIO_SUPPORT)
-    if (cfg->audio.input_enabled && stream.audio_enabled) {
-        IMPAudioServerMediaSubsession *audioSub = IMPAudioServerMediaSubsession::createNew(*env, 0);
-        sms->addSubsession(audioSub);
-        LOG_INFO("Audio stream " << chnNr << " added to session");
+    if (cfg->audio.output_enabled) {
+        BackchannelServerMediaSubsession* backchannelSub = BackchannelServerMediaSubsession::createNew(*env);
+        sms->addSubsession(backchannelSub);
+        LOG_INFO("Backchannel subsession added.");
     }
 #endif
 
 #if defined(AUDIO_SUPPORT)
     if (cfg->audio.output_enabled) {
-        BackchannelServerMediaSubsession* backchannelSub = IMPBackchannel::createNewSubsession(*env);
-        if (backchannelSub) {
-            sms->addSubsession(backchannelSub);
-            LOG_INFO("Backchannel subsession added.");
-        } else {
-            LOG_ERROR("Failed to create backchannel subsession via IMPBackchannel factory.");
-        }
+        BackchannelServerMediaSubsession* backchannelSub = BackchannelServerMediaSubsession::createNew(*env);
+        sms->addSubsession(backchannelSub);
+        LOG_INFO("Backchannel subsession added.");
     }
 #endif
 
@@ -104,8 +100,6 @@ void RTSP::start()
     scheduler = BasicTaskScheduler::createNew();
     env = BasicUsageEnvironment::createNew(*scheduler);
 
-    // ADEC init/deinit is now handled in main.cpp
-    
     if (cfg->rtsp.auth_required)
     {
         UserAuthenticationDatabase *auth = new UserAuthenticationDatabase;
@@ -177,8 +171,6 @@ void RTSP::start()
 
     // Cleanup RTSP server and environment
     Medium::close(rtspServer); // Close RTSP server first
-
-    // ADEC deinit is now handled in main.cpp
 
     env->reclaim(); // Reclaim environment *after* closing sink
     delete scheduler;

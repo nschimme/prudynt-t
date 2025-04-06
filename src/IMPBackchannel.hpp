@@ -19,33 +19,24 @@ enum class IMPBackchannelFormat {
 const unsigned IMP_BACKCHANNEL_FREQ_PCMU = 8000;
 const unsigned IMP_BACKCHANNEL_FREQ_PCMA = 8000;
 
-
 #include "BackchannelSink.hpp"
-
-class BackchannelServerMediaSubsession;
 
 class IMPBackchannel {
 public:
-    static BackchannelServerMediaSubsession* createNewSubsession(UsageEnvironment& env);
+    IMPBackchannel();
+    ~IMPBackchannel();
 
-    static int init();
-    static void deinit();
+    int init();
+    void deinit();
 
-    static int getADECChannel(IMPBackchannelFormat format);
-
-    static unsigned getFrequency(IMPBackchannelFormat format);
-    static IMPBackchannelFormat formatFromRtpPayloadType(unsigned char rtpPayloadType);
-    static int rtpPayloadTypeFromFormat(IMPBackchannelFormat format);
-
+    int getADECChannel(IMPBackchannelFormat format);
+    unsigned getFrequency(IMPBackchannelFormat format);
+    IMPBackchannelFormat formatFromRtpPayloadType(unsigned char rtpPayloadType);
+    int rtpPayloadTypeFromFormat(IMPBackchannelFormat format);
 
 private:
     static std::map<IMPBackchannelFormat, int> adecChannels;
     static bool decoderInitialized;
-
-    IMPBackchannel() = delete;
-    ~IMPBackchannel() = delete;
-    IMPBackchannel(const IMPBackchannel&) = delete;
-    IMPBackchannel& operator=(const IMPBackchannel&) = delete;
 };
 
 #endif // IMP_BACKCHANNEL_HPP
