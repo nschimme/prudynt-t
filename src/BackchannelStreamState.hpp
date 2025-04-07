@@ -59,11 +59,6 @@ public:
                       ServerRequestAlternativeByteHandler* serverRequestAlternativeByteHandler,
                       void* serverRequestAlternativeByteHandlerClientData);
 
-    void incrementReferenceCount() { ++fReferenceCount; }
-    unsigned referenceCount() const { return fReferenceCount; }
-    unsigned decrementReferenceCount() { return --fReferenceCount; }
-
-
 private:
     BackchannelServerMediaSubsession& master;
     RTPSource* rtpSource;
@@ -72,7 +67,6 @@ private:
     Groupsock* rtcpGS;
     RTCPInstance* rtcpInstance;
     unsigned clientSessionId;
-    unsigned fReferenceCount;
 };
 
 #endif // BACKCHANNEL_STREAM_STATE_HPP

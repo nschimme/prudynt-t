@@ -7,15 +7,14 @@
 
 #define MODULE "BackchannelStreamState"
 
-BackchannelStreamState::BackchannelStreamState(BackchannelServerMediaSubsession& _master,
-                                               RTPSource* _rtpSource, BackchannelSink* _mediaSink,
-                                               Groupsock* _rtpGS, Groupsock* _rtcpGS, unsigned _clientSessionId)
-    : master(_master), rtpSource(_rtpSource), mediaSink(_mediaSink),
-      rtpGS(_rtpGS), rtcpGS(_rtcpGS), rtcpInstance(nullptr), clientSessionId(_clientSessionId),
-      fReferenceCount(1)
-{
-    LOG_DEBUG("Created for session " << clientSessionId);
-}
+ BackchannelStreamState::BackchannelStreamState(BackchannelServerMediaSubsession& _master,
+                                                RTPSource* _rtpSource, BackchannelSink* _mediaSink,
+                                                Groupsock* _rtpGS, Groupsock* _rtcpGS, unsigned _clientSessionId)
+     : master(_master), rtpSource(_rtpSource), mediaSink(_mediaSink),
+       rtpGS(_rtpGS), rtcpGS(_rtcpGS), rtcpInstance(nullptr), clientSessionId(_clientSessionId)
+ {
+     LOG_DEBUG("Created for session " << clientSessionId);
+ }
 
 BackchannelStreamState::~BackchannelStreamState()
 {

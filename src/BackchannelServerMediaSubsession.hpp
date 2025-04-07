@@ -23,21 +23,21 @@ class MediaSink;
 
 #include "BackchannelStreamState.hpp"
 
- class BackchannelServerMediaSubsession : public ServerMediaSubsession {
- friend class BackchannelStreamState;
- public:
-     static BackchannelServerMediaSubsession* createNew(UsageEnvironment& env, IMPBackchannelFormat format, Boolean reuseFirstSource = False);
+  class BackchannelServerMediaSubsession : public ServerMediaSubsession {
+  friend class BackchannelStreamState;
+  public:
+      static BackchannelServerMediaSubsession* createNew(UsageEnvironment& env, IMPBackchannelFormat format);
 
-     virtual ~BackchannelServerMediaSubsession();
+      virtual ~BackchannelServerMediaSubsession();
 
 public:
     virtual void closeStreamSource(FramedSource *inputSource);
-    virtual void closeStreamSink(MediaSink *outputSink);
+     virtual void closeStreamSink(MediaSink *outputSink);
 
- protected:
-     BackchannelServerMediaSubsession(UsageEnvironment& env, IMPBackchannelFormat format, Boolean reuseFirstSource);
+  protected:
+      BackchannelServerMediaSubsession(UsageEnvironment& env, IMPBackchannelFormat format);
 
-    virtual char const* sdpLines(int addressFamily);
+     virtual char const* sdpLines(int addressFamily);
     virtual void getStreamParameters(unsigned clientSessionId,
                                      struct sockaddr_storage const& clientAddress,
                                      Port const& clientRTPPort,
@@ -59,21 +59,16 @@ public:
                              void* serverRequestAlternativeByteHandlerClientData);
     virtual void getRTPSinkandRTCP(void* streamToken, RTPSink*& rtpSink, RTCPInstance*& rtcp);
 
-    virtual Boolean getServerPorts(Port& rtpPort, Port& rtcpPort);
-
     virtual MediaSink* createNewStreamDestination(unsigned clientSessionId, unsigned& estBitrate);
     virtual RTPSource* createNewRTPSource(Groupsock* rtpGroupsock, unsigned char rtpPayloadTypeIfDynamic, MediaSink* outputSink);
     virtual char const* getAuxSDPLine(RTPSink* rtpSink, FramedSource* inputSource);
 
     virtual void deleteStreamState(void*& streamToken);
 
-
 private:
     char* fSDPLines = nullptr;
      HashTable* fDestinationsHashTable;
      char fCNAME[MAX_CNAME_LEN+1];
-     void* fLastStreamToken;
-     Boolean fReuseFirstSource;
      portNumBits fInitialPortNum;
      Boolean fMultiplexRTCPWithRTP;
      IMPBackchannelFormat fFormat;

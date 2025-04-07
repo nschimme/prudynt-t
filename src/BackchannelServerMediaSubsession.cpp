@@ -25,18 +25,17 @@ static void delayedDeleteTask(void* clientData) {
     BackchannelStreamState* state = (BackchannelStreamState*)clientData;
     LOG_DEBUG("Deleting BackchannelStreamState");
     delete state;
-}
+ }
 
-BackchannelServerMediaSubsession* BackchannelServerMediaSubsession::createNew(UsageEnvironment& env, IMPBackchannelFormat format, Boolean reuseFirstSource) {
-    return new BackchannelServerMediaSubsession(env, format, reuseFirstSource);
-}
+ BackchannelServerMediaSubsession* BackchannelServerMediaSubsession::createNew(UsageEnvironment& env, IMPBackchannelFormat format /*, Boolean reuseFirstSource - Removed */) {
+     return new BackchannelServerMediaSubsession(env, format);
+ }
 
-BackchannelServerMediaSubsession::BackchannelServerMediaSubsession(UsageEnvironment& env, IMPBackchannelFormat format, Boolean reuseFirstSource)
-    : ServerMediaSubsession(env), fSDPLines(nullptr), /* fStreamData removed */
-      fLastStreamToken(nullptr), fReuseFirstSource(reuseFirstSource),
-      fInitialPortNum(6970), fMultiplexRTCPWithRTP(False), fFormat(format)
-{
-    LOG_DEBUG("Subsession created for channel " << static_cast<int>(fFormat));
+ BackchannelServerMediaSubsession::BackchannelServerMediaSubsession(UsageEnvironment& env, IMPBackchannelFormat format /*, Boolean reuseFirstSource - Removed */)
+     : ServerMediaSubsession(env), fSDPLines(nullptr)
+       , fInitialPortNum(6970), fMultiplexRTCPWithRTP(False), fFormat(format)
+ {
+     LOG_DEBUG("Subsession created for channel " << static_cast<int>(fFormat));
     fDestinationsHashTable = HashTable::create(ONE_WORD_HASH_KEYS);
     gethostname(fCNAME, MAX_CNAME_LEN);
     fCNAME[MAX_CNAME_LEN] = '\0';
@@ -156,18 +155,6 @@ RTPSource* BackchannelServerMediaSubsession::createNewRTPSource(Groupsock* rtpGr
                                       False); // allowMultipleFramesPerPacket
 }
 
-Boolean BackchannelServerMediaSubsession::getServerPorts(Port& rtpPort, Port& rtcpPort) {
-    if (fLastStreamToken == nullptr) return False;
-    BackchannelStreamState* lastState = (BackchannelStreamState*)fLastStreamToken;
-    if (lastState->rtpGS == nullptr || lastState->rtcpGS == nullptr) {
-         LOG_DEBUG("Cannot reuse state for UDP ports (likely TCP state).");
-         return False;
-    }
-    rtpPort = lastState->rtpGS->port();
-    rtcpPort = lastState->rtcpGS->port();
-    return True;
-}
-
 char const* BackchannelServerMediaSubsession::getAuxSDPLine(RTPSink* /*rtpSink*/, FramedSource* /*inputSource*/) {
     // Could potentially add fmtp line here instead of sdpLines if needed
     return nullptr;
@@ -195,119 +182,106 @@ void BackchannelServerMediaSubsession::getStreamParameters(unsigned clientSessio
 
     LOG_DEBUG("getStreamParameters for session " << clientSessionId);
     isMulticast = False;
-    streamToken = nullptr;
+     streamToken = nullptr;
 
-    if (addressIsNull(destinationAddress)) {
-        destinationAddress = clientAddress;
-    }
+     if (addressIsNull(destinationAddress)) {
+         destinationAddress = clientAddress;
+     }
 
-    if (fLastStreamToken != nullptr && fReuseFirstSource) {
-        LOG_INFO("Reusing stream state for session " << clientSessionId);
-        BackchannelStreamState* lastState = (BackchannelStreamState*)fLastStreamToken;
-        if (lastState->rtpGS == nullptr || lastState->rtcpGS == nullptr) {
-             LOG_ERROR("Failed to get server ports from reusable stream state (not UDP?)!");
-             return;
-        }
-        serverRTPPort = lastState->rtpGS->port();
-        serverRTCPPort = lastState->rtcpGS->port();
-        lastState->incrementReferenceCount();
-        streamToken = fLastStreamToken;
-        LOG_DEBUG("Reused state: Ref count now " << lastState->referenceCount());
-    } else {
-        LOG_DEBUG("Not reusing state for session " << clientSessionId << ". Creating new state.");
-        unsigned streamBitrate = 0;
-        MediaSink* mediaSink = nullptr;
-        RTPSource* rtpSource = nullptr;
-        Groupsock* rtpGroupsock = nullptr;
-        Groupsock* rtcpGroupsock = nullptr;
+     // Always create new state, remove reuse logic
+     LOG_DEBUG("Creating new stream state for session " << clientSessionId);
+     unsigned streamBitrate = 0;
+     MediaSink* mediaSink = nullptr;
+     RTPSource* rtpSource = nullptr;
+     Groupsock* rtpGroupsock = nullptr;
+     Groupsock* rtcpGroupsock = nullptr;
 
-        LOG_DEBUG("Calling createNewStreamDestination for session " << clientSessionId);
-        mediaSink = createNewStreamDestination(clientSessionId, streamBitrate);
-        if (mediaSink == nullptr) {
-            LOG_ERROR(">>> getStreamParameters: createNewStreamDestination FAILED for session " << clientSessionId);
-            return;
-        }
-        LOG_DEBUG("createNewStreamDestination succeeded for session " << clientSessionId << ". Sink: " << (int)mediaSink);
+     LOG_DEBUG("Calling createNewStreamDestination for session " << clientSessionId);
+     mediaSink = createNewStreamDestination(clientSessionId, streamBitrate);
+     if (mediaSink == nullptr) {
+         LOG_ERROR(">>> getStreamParameters: createNewStreamDestination FAILED for session " << clientSessionId);
+         return;
+     }
+     LOG_DEBUG("createNewStreamDestination succeeded for session " << clientSessionId << ". Sink: " << (int)mediaSink);
 
-        if (clientRTPPort.num() != 0 || tcpSocketNum >= 0) {
-            if (clientRTCPPort.num() == 0 && tcpSocketNum < 0) {
-                 LOG_ERROR("Raw UDP streaming not supported for backchannel");
-                 if (mediaSink) Medium::close(mediaSink);
-                 return;
-            } else if (tcpSocketNum < 0) {
-                LOG_DEBUG("Attempting UDP port allocation for session " << clientSessionId);
-                NoReuse dummy(envir());
-                portNumBits serverPortNum = fInitialPortNum;
-                while(1) {
-                    serverRTPPort = serverPortNum;
-                    struct sockaddr_storage nullAddr;
-                    memset(&nullAddr, 0, sizeof(nullAddr));
-                    nullAddr.ss_family = AF_INET;
-                    rtpGroupsock = new Groupsock(envir(), nullAddr, serverRTPPort, 255);
-                    if (rtpGroupsock->socketNum() < 0) {
-                        delete rtpGroupsock; rtpGroupsock = nullptr;
-                        serverPortNum += (fMultiplexRTCPWithRTP ? 1 : 2);
-                        continue;
-                    }
+     if (clientRTPPort.num() != 0 || tcpSocketNum >= 0) {
+         if (clientRTCPPort.num() == 0 && tcpSocketNum < 0) {
+              LOG_ERROR("Raw UDP streaming not supported for backchannel");
+              if (mediaSink) Medium::close(mediaSink);
+              return;
+         } else if (tcpSocketNum < 0) {
+             LOG_DEBUG("Attempting UDP port allocation for session " << clientSessionId);
+             NoReuse dummy(envir());
+             portNumBits serverPortNum = fInitialPortNum;
+             while(1) {
+                 serverRTPPort = serverPortNum;
+                 struct sockaddr_storage nullAddr;
+                 memset(&nullAddr, 0, sizeof(nullAddr));
+                 nullAddr.ss_family = AF_INET;
+                 rtpGroupsock = new Groupsock(envir(), nullAddr, serverRTPPort, 255);
+                 if (rtpGroupsock->socketNum() < 0) {
+                     delete rtpGroupsock; rtpGroupsock = nullptr;
+                     serverPortNum += (fMultiplexRTCPWithRTP ? 1 : 2);
+                     continue;
+                 }
 
-                    if (fMultiplexRTCPWithRTP) {
-                        serverRTCPPort = serverRTPPort;
-                        rtcpGroupsock = rtpGroupsock;
-                    } else {
-                        serverRTCPPort = ++serverPortNum;
-                        rtcpGroupsock = new Groupsock(envir(), nullAddr, serverRTCPPort, 255);
-                        if (rtcpGroupsock->socketNum() < 0) {
-                            delete rtpGroupsock; rtpGroupsock = nullptr;
-                            delete rtcpGroupsock; rtcpGroupsock = nullptr;
-                            ++serverPortNum;
-                            continue;
-                        }
+                 if (fMultiplexRTCPWithRTP) {
+                     serverRTCPPort = serverRTPPort;
+                     rtcpGroupsock = rtpGroupsock;
+                 } else {
+                     serverRTCPPort = ++serverPortNum;
+                     rtcpGroupsock = new Groupsock(envir(), nullAddr, serverRTCPPort, 255);
+                     if (rtcpGroupsock->socketNum() < 0) {
+                         delete rtpGroupsock; rtpGroupsock = nullptr;
+                         delete rtcpGroupsock; rtcpGroupsock = nullptr;
+                         ++serverPortNum;
+                         continue;
                      }
-                     break;
-                 }
-                 if (rtpGroupsock != nullptr && rtpGroupsock->socketNum() >= 0) {
-                     unsigned requestedSize = 262144;
-                     LOG_INFO("Attempting to increase RTP socket receive buffer for session " << clientSessionId << " to " << requestedSize);
-                     increaseReceiveBufferTo(envir(), rtpGroupsock->socketNum(), requestedSize);
-                 }
-                 LOG_DEBUG("UDP port allocation succeeded for session " << clientSessionId << ". RTP=" << ntohs(serverRTPPort.num()) << ", RTCP=" << ntohs(serverRTCPPort.num()));
-             } else {
-                  LOG_DEBUG("Client requested TCP interleaved mode for session " << clientSessionId);
-                 serverRTPPort = 0;
-                 serverRTCPPort = 0;
-                 rtpGroupsock = nullptr;
-                 rtcpGroupsock = nullptr;
-                 struct sockaddr_storage dummyAddr; memset(&dummyAddr, 0, sizeof dummyAddr); dummyAddr.ss_family = AF_INET;
-                 Port dummyPort(0);
-                 rtpGroupsock = new Groupsock(envir(), dummyAddr, dummyPort, 0);
-                 rtcpGroupsock = new Groupsock(envir(), dummyAddr, dummyPort, 0);
-                 LOG_DEBUG("Created dummy RTP Groupsock (" << (int)rtpGroupsock << ") and dummy RTCP Groupsock (" << (int)rtcpGroupsock << ") for TCP mode.");
-            }
+                  }
+                  break;
+              }
+              if (rtpGroupsock != nullptr && rtpGroupsock->socketNum() >= 0) {
+                  unsigned requestedSize = 262144;
+                  LOG_INFO("Attempting to increase RTP socket receive buffer for session " << clientSessionId << " to " << requestedSize);
+                  increaseReceiveBufferTo(envir(), rtpGroupsock->socketNum(), requestedSize);
+              }
+              LOG_DEBUG("UDP port allocation succeeded for session " << clientSessionId << ". RTP=" << ntohs(serverRTPPort.num()) << ", RTCP=" << ntohs(serverRTCPPort.num()));
+          } else {
+               LOG_DEBUG("Client requested TCP interleaved mode for session " << clientSessionId);
+              serverRTPPort = 0;
+              serverRTCPPort = 0;
+              rtpGroupsock = nullptr;
+              rtcpGroupsock = nullptr;
+              struct sockaddr_storage dummyAddr; memset(&dummyAddr, 0, sizeof dummyAddr); dummyAddr.ss_family = AF_INET;
+              Port dummyPort(0);
+              rtpGroupsock = new Groupsock(envir(), dummyAddr, dummyPort, 0);
+              rtcpGroupsock = new Groupsock(envir(), dummyAddr, dummyPort, 0);
+              LOG_DEBUG("Created dummy RTP Groupsock (" << (int)rtpGroupsock << ") and dummy RTCP Groupsock (" << (int)rtcpGroupsock << ") for TCP mode.");
+         }
 
-            LOG_DEBUG("Calling createNewRTPSource for session " << clientSessionId);
-            rtpSource = createNewRTPSource(rtpGroupsock, 0, mediaSink);
-            if (rtpSource == nullptr) {
-                LOG_ERROR(">>> getStreamParameters: createNewRTPSource FAILED for session " << clientSessionId);
-                if (mediaSink) Medium::close(mediaSink);
-                delete rtpGroupsock;
-                if (rtcpGroupsock != rtpGroupsock) delete rtcpGroupsock;
-                return;
-            }
-             LOG_DEBUG("createNewRTPSource succeeded for session " << clientSessionId << ". Source: " << (int)rtpSource);
-
-        } else {
-             LOG_ERROR(">>> getStreamParameters: Invalid parameters (no client ports or TCP socket) for session " << clientSessionId);
+         LOG_DEBUG("Calling createNewRTPSource for session " << clientSessionId);
+         rtpSource = createNewRTPSource(rtpGroupsock, 0, mediaSink);
+         if (rtpSource == nullptr) {
+             LOG_ERROR(">>> getStreamParameters: createNewRTPSource FAILED for session " << clientSessionId);
              if (mediaSink) Medium::close(mediaSink);
+             delete rtpGroupsock;
+             if (rtcpGroupsock != rtpGroupsock) delete rtcpGroupsock;
              return;
-        }
+         }
+          LOG_DEBUG("createNewRTPSource succeeded for session " << clientSessionId << ". Source: " << (int)rtpSource);
 
-        LOG_DEBUG("Creating StreamState for session " << clientSessionId);
-        BackchannelStreamState* state = new BackchannelStreamState(*this, rtpSource, (BackchannelSink*)mediaSink, rtpGroupsock, rtcpGroupsock, clientSessionId);
-        streamToken = fLastStreamToken = (void*)state;
-        LOG_DEBUG("Created StreamState for session " << clientSessionId << ". State: " << (int)state << ". Assigned to streamToken.");
-    }
+     } else {
+          LOG_ERROR(">>> getStreamParameters: Invalid parameters (no client ports or TCP socket) for session " << clientSessionId);
+          if (mediaSink) Medium::close(mediaSink);
+          return;
+     }
 
-    BackchannelDestinations* destinations;
+     LOG_DEBUG("Creating StreamState for session " << clientSessionId);
+     BackchannelStreamState* state = new BackchannelStreamState(*this, rtpSource, (BackchannelSink*)mediaSink, rtpGroupsock, rtcpGroupsock, clientSessionId);
+     streamToken = (void*)state;
+     LOG_DEBUG("Created StreamState for session " << clientSessionId << ". State: " << (int)state << ". Assigned to streamToken.");
+
+     BackchannelDestinations* destinations;
     LOG_DEBUG("Creating Destinations for session " << clientSessionId);
     if (tcpSocketNum < 0) {
         destinations = new BackchannelDestinations(destinationAddress, clientRTPPort, clientRTCPPort);
@@ -371,50 +345,37 @@ void BackchannelServerMediaSubsession::deleteStreamState(void*& streamToken) {
         return;
     }
 
-    BackchannelStreamState* state = (BackchannelStreamState*)streamToken;
-    LOG_DEBUG("deleteStreamState: State pointer from token: " << (int)state);
-    if (state != nullptr) {
-        unsigned currentRefCount = state->referenceCount();
-        LOG_DEBUG("Current ref count for session " << state->clientSessionId << " is " << currentRefCount << ". Decrementing...");
-        if (state->decrementReferenceCount() == 0) {
-            LOG_DEBUG("Ref count is zero. Proceeding with deletion for session " << state->clientSessionId);
-            unsigned sid = state->clientSessionId;
+     BackchannelStreamState* state = (BackchannelStreamState*)streamToken;
+     LOG_DEBUG("deleteStreamState: State pointer from token: " << (int)state);
+     if (state != nullptr) {
+         LOG_DEBUG("Proceeding with deletion for session " << state->clientSessionId);
+         unsigned sid = state->clientSessionId;
 
-            LOG_DEBUG("deleteStreamState: Looking up destinations for clientSessionId: " << sid);
-            BackchannelDestinations* dests = (BackchannelDestinations*)(fDestinationsHashTable->Lookup((char const*)sid));
-            LOG_DEBUG("deleteStreamState: Found destinations pointer: " << (int)dests << ". Removing from table if found.");
-            if (dests) {
-                LOG_DEBUG("Removing Destinations for session " << sid << " from hash table.");
-                fDestinationsHashTable->Remove((char const*)sid);
-                LOG_DEBUG("Deleting Destinations object for session " << sid);
-                delete dests;
-            } else {
-                LOG_DEBUG("No Destinations found in hash table for session " << sid << " to remove.");
-            }
+         LOG_DEBUG("deleteStreamState: Looking up destinations for clientSessionId: " << sid);
+         BackchannelDestinations* dests = (BackchannelDestinations*)(fDestinationsHashTable->Lookup((char const*)sid));
+         LOG_DEBUG("deleteStreamState: Found destinations pointer: " << (int)dests << ". Removing from table if found.");
+         if (dests) {
+             LOG_DEBUG("Removing Destinations for session " << sid << " from hash table.");
+             fDestinationsHashTable->Remove((char const*)sid);
+             LOG_DEBUG("Deleting Destinations object for session " << sid);
+             delete dests;
+         } else {
+             LOG_DEBUG("No Destinations found in hash table for session " << sid << " to remove.");
+         }
 
-            if (streamToken == fLastStreamToken) {
-                LOG_DEBUG("Clearing fLastStreamToken because it matches the token being deleted.");
-                fLastStreamToken = nullptr;
-            }
+         LOG_DEBUG("Scheduling delayed deletion of StreamState object for session " << sid << " at address " << (int)state);
+         envir().taskScheduler().scheduleDelayedTask(0, (TaskFunc*)delayedDeleteTask, state);
+         state = nullptr;
 
-            LOG_DEBUG("Scheduling delayed deletion of StreamState object for session " << sid << " at address " << (int)state);
-            envir().taskScheduler().scheduleDelayedTask(0, (TaskFunc*)delayedDeleteTask, state);
-            state = nullptr;
+     } else {
+         LOG_DEBUG("deleteStreamState called with state pointer already NULL (token: " << (int)streamToken << ")");
+     }
 
-        } else {
-             LOG_DEBUG("Decremented ref count for session " << state->clientSessionId << " to " << state->referenceCount() << ". State not deleted (token: " << (int)streamToken << ")");
-        }
-    } else {
-        LOG_DEBUG("deleteStreamState called with state pointer already NULL (token: " << (int)streamToken << ")");
-    }
-
-    if (state == nullptr) {
-         LOG_DEBUG("Clearing caller's streamToken pointer.");
-         streamToken = nullptr;
-    } else {
-         LOG_DEBUG("Not clearing caller's streamToken pointer (state=" << (int)state << ", refCount=" << state->referenceCount() << ")");
-    }
-}
+     if (state == nullptr) {
+          LOG_DEBUG("Clearing caller's streamToken pointer.");
+          streamToken = nullptr;
+     }
+ }
 
 void BackchannelServerMediaSubsession::closeStreamSource(FramedSource *inputSource) {
      Medium::close(inputSource);
