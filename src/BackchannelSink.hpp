@@ -1,6 +1,9 @@
 #ifndef BACKCHANNEL_SINK_HPP
 #define BACKCHANNEL_SINK_HPP
 
+// Receives audio data, encapsulates it in BackchannelFrame, enqueues it, and
+// handles inactivity timeouts by sending stop frames.
+
 #include "IMPBackchannel.hpp"
 #include "Logger.hpp"
 
@@ -45,10 +48,9 @@ private:
 
     static void staticOnSourceClosure(void *clientData);
 
-    // Helper functions for sending frames to the processor queue
     void sendBackchannelFrame(const uint8_t *payload,
-                              unsigned payloadSize); // No timestamp param
-    void sendBackchannelStopFrame();                 // Renamed from sendStopSignal
+                              unsigned payloadSize);
+    void sendBackchannelStopFrame();
 
     FramedSource *fRTPSource;
     u_int8_t *fReceiveBuffer;

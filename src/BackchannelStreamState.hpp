@@ -1,6 +1,9 @@
 #ifndef BACKCHANNEL_STREAM_STATE_HPP
 #define BACKCHANNEL_STREAM_STATE_HPP
 
+// Manages the state of a backchannel audio stream, associating RTP source,
+// sink, groupsocks, and transport details.
+
 #include "BackchannelSink.hpp"
 #include "Logger.hpp"
 

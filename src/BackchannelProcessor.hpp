@@ -1,6 +1,9 @@
 #ifndef BACKCHANNEL_PROCESSOR_HPP
 #define BACKCHANNEL_PROCESSOR_HPP
 
+// Processes audio frames, decodes them, handles session management (who is
+// "current"), resamples, and sends PCM data to a pipe.
+
 #include "IMPBackchannel.hpp"
 #include "globals.hpp"
 

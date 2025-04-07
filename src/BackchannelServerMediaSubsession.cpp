@@ -114,13 +114,17 @@ char const *BackchannelServerMediaSubsession::sdpLines(int /*addressFamily*/)
     return fSDPLines;
 }
 
-MediaSink *BackchannelServerMediaSubsession::createNewStreamDestination(unsigned clientSessionId,
-                                                                        unsigned &estBitrate)
+char const *BackchannelServerMediaSubsession::getAuxSDPLine(RTPSink * /*rtpSink*/,
+                                                            FramedSource * /*inputSource*/)
 {
-    // Estimate bitrate based on format
-    estBitrate = estimatedBitrate();
-    LOG_DEBUG("Creating BackchannelSink for channel: " << static_cast<int>(fFormat)
-                                                       << " (est bitrate: " << estBitrate << ")");
+    // No auxiliary SDP line needed
+    return nullptr;
+}
+
+MediaSink *BackchannelServerMediaSubsession::createNewStreamDestination(unsigned clientSessionId,
+                                                                        unsigned &/*estBitrate*/)
+{
+    LOG_DEBUG("Creating BackchannelSink for channel: " << static_cast<int>(fFormat));
     return BackchannelSink::createNew(envir(), clientSessionId, fFormat);
 }
 
@@ -150,13 +154,6 @@ RTPSource *BackchannelServerMediaSubsession::createNewRTPSource(
                                       False); // allowMultipleFramesPerPacket
 }
 
-char const *BackchannelServerMediaSubsession::getAuxSDPLine(RTPSink * /*rtpSink*/,
-                                                            FramedSource * /*inputSource*/)
-{
-    // No auxiliary SDP line needed
-    return nullptr;
-}
-
 void BackchannelServerMediaSubsession::getStreamParameters(
     unsigned clientSessionId,
     struct sockaddr_storage const &clientAddress,
@@ -182,13 +179,18 @@ void BackchannelServerMediaSubsession::getStreamParameters(
         destinationAddress = clientAddress;
     }
 
-    unsigned streamBitrate = 0;
-    MediaSink *mediaSink = nullptr;
-    RTPSource *rtpSource = nullptr;
-    Groupsock *rtpGroupsock = nullptr;
-    Groupsock *rtcpGroupsock = nullptr;
+    // Validate transport parameters
+    if (clientRTPPort.num() == 0 && tcpSocketNum < 0)
+    {
+        LOG_ERROR(
+            "getStreamParameters: Invalid parameters (no client ports or TCP socket) for session "
+            << clientSessionId);
+        return;
+    }
 
-    mediaSink = createNewStreamDestination(clientSessionId, streamBitrate);
+    // Create MediaSink
+    unsigned streamBitrate = 0;
+    MediaSink *mediaSink = createNewStreamDestination(clientSessionId, streamBitrate);
     if (mediaSink == nullptr)
     {
         LOG_ERROR("getStreamParameters: createNewStreamDestination FAILED for session "
@@ -196,73 +198,79 @@ void BackchannelServerMediaSubsession::getStreamParameters(
         return;
     }
 
-    // Set up transport (UDP or TCP)
-    if (clientRTPPort.num() != 0 || tcpSocketNum >= 0)
-    {
-        if (clientRTCPPort.num() == 0 && tcpSocketNum < 0)
+    // Initialize transport variables
+    Groupsock *rtpGroupsock = nullptr;
+    Groupsock *rtcpGroupsock = nullptr;
+    Boolean isTCP = (tcpSocketNum >= 0);
+
+    // Set up transport (UDP or TCP) and create Groupsocks
+    if (!isTCP)
+    { // UDP
+        if (clientRTCPPort.num() == 0)
         {
             // This might be okay if the client doesn't intend to send RTCP Sender Reports
             LOG_WARN("Client requested UDP streaming but provided no RTCP port for session "
                      << clientSessionId);
         }
 
-        if (tcpSocketNum < 0)
-        { // UDP
-            // Call the helper function to allocate ports and create groupsocks
-            if (!allocateUdpPorts(serverRTPPort, serverRTCPPort, rtpGroupsock, rtcpGroupsock))
-            {
-                LOG_ERROR("getStreamParameters: Failed to allocate UDP ports for session "
-                          << clientSessionId);
-                if (mediaSink)
-                    Medium::close(mediaSink);
-                delete rtpGroupsock; // Safe even if null
-                if (rtcpGroupsock != rtpGroupsock)
-                    delete rtcpGroupsock; // Safe even if null
-                return;
-            }
-        }
-        else
-        {                      // TCP
-            serverRTPPort = 0; // Indicate TCP
-            serverRTCPPort = 0;
-            struct sockaddr_storage dummyAddr;
-            memset(&dummyAddr, 0, sizeof dummyAddr);
-            dummyAddr.ss_family = AF_INET;
-            Port dummyPort(0);
-            // Create dummy groupsocks - needed for RTPSource/RTCPInstance potentially
-            rtpGroupsock = new Groupsock(envir(), dummyAddr, dummyPort, 0);
-            rtcpGroupsock = new Groupsock(envir(), dummyAddr, dummyPort, 0);
-        }
-
-        // Create the RTPSource (which receives data)
-        rtpSource = createNewRTPSource(rtpGroupsock, 0, mediaSink);
-        if (rtpSource == nullptr)
+        // Allocate UDP ports and create groupsocks
+        if (!allocateUdpPorts(serverRTPPort, serverRTCPPort, rtpGroupsock, rtcpGroupsock))
         {
-            LOG_ERROR("getStreamParameters: createNewRTPSource FAILED for session "
+            LOG_ERROR("getStreamParameters: Failed to allocate UDP ports for session "
                       << clientSessionId);
-            if (mediaSink)
-                Medium::close(mediaSink);
-            delete rtpGroupsock;
-            if (rtcpGroupsock != rtpGroupsock)
-                delete rtcpGroupsock;
+            Medium::close(mediaSink);
+            // allocateUdpPorts cleans up its own groupsocks on failure
             return;
         }
     }
     else
-    {
-        LOG_ERROR(
-            "getStreamParameters: Invalid parameters (no client ports or TCP socket) for session "
-            << clientSessionId);
-        if (mediaSink)
+    { // TCP
+        serverRTPPort = 0;
+        serverRTCPPort = 0;
+        struct sockaddr_storage dummyAddr;
+        memset(&dummyAddr, 0, sizeof dummyAddr);
+        dummyAddr.ss_family = AF_INET;
+        Port dummyPort(0);
+
+        // Create dummy groupsocks
+        rtpGroupsock = new Groupsock(envir(), dummyAddr, dummyPort, 0);
+        if (rtpGroupsock == nullptr || rtpGroupsock->socketNum() < 0)
+        {
+            LOG_ERROR("getStreamParameters: Failed to create dummy RTP Groupsock for TCP session "
+                      << clientSessionId);
             Medium::close(mediaSink);
+            delete rtpGroupsock; // Safe even if null
+            return;
+        }
+
+        rtcpGroupsock = new Groupsock(envir(), dummyAddr, dummyPort, 0);
+        if (rtcpGroupsock == nullptr || rtcpGroupsock->socketNum() < 0)
+        {
+            LOG_ERROR("getStreamParameters: Failed to create dummy RTCP Groupsock for TCP session "
+                      << clientSessionId);
+            Medium::close(mediaSink);
+            delete rtpGroupsock;
+            delete rtcpGroupsock; // Safe even if null
+            return;
+        }
+    }
+
+    // Create the RTPSource (which receives data) using the established groupsock
+    RTPSource *rtpSource = createNewRTPSource(rtpGroupsock, 0, mediaSink);
+    if (rtpSource == nullptr)
+    {
+        LOG_ERROR("getStreamParameters: createNewRTPSource FAILED for session " << clientSessionId);
+        Medium::close(mediaSink);
+        delete rtpGroupsock;
+        if (rtcpGroupsock != rtpGroupsock) // Avoid double delete if multiplexing
+            delete rtcpGroupsock;
         return;
     }
 
-    // Create our custom stream state object, passing destination details
-    Boolean isTCP = (tcpSocketNum >= 0);
+    // Create our custom stream state object
     BackchannelStreamState *state
         = new BackchannelStreamState(envir(),
-                                     fCNAME, // Pass env and CNAME instead of *this
+                                     fCNAME,
                                      rtpSource,
                                      (BackchannelSink *) mediaSink,
                                      rtpGroupsock,
@@ -276,101 +284,21 @@ void BackchannelServerMediaSubsession::getStreamParameters(
                                      rtpChannelId,
                                      rtcpChannelId,
                                      tlsState);
-    streamToken = (void *) state;
-}
-
-void BackchannelServerMediaSubsession::startStream(
-    unsigned clientSessionId,
-    void *streamToken,
-    TaskFunc *rtcpRRHandler,
-    void *rtcpRRHandlerClientData,
-    unsigned short &rtpSeqNum,
-    unsigned &rtpTimestamp,
-    ServerRequestAlternativeByteHandler *serverRequestAlternativeByteHandler,
-    void *serverRequestAlternativeByteHandlerClientData)
-{
-    BackchannelStreamState *state = (BackchannelStreamState *) streamToken;
 
     if (state == nullptr)
     {
-        LOG_DEBUG("Client setup/probe initiated (NULL streamToken) for session " << clientSessionId);
+        LOG_ERROR("getStreamParameters: Failed to create BackchannelStreamState for session "
+                  << clientSessionId);
+        Medium::close(rtpSource);
+        Medium::close(mediaSink);
+        delete rtpGroupsock;
+        if (rtcpGroupsock != rtpGroupsock)
+            delete rtcpGroupsock;
         return;
     }
 
-    state->startPlaying(rtcpRRHandler,
-                        rtcpRRHandlerClientData,
-                        serverRequestAlternativeByteHandler,
-                        serverRequestAlternativeByteHandlerClientData);
-
-    // Set initial RTP seq num and timestamp
-    rtpSeqNum = 0;
-    rtpTimestamp = 0;
-    RTPSource *rtpSource = state->rtpSource;
-    if (rtpSource != nullptr)
-    {
-        rtpSeqNum = rtpSource->curPacketMarkerBit() ? (rtpSource->curPacketRTPSeqNum() + 1)
-                                                    : rtpSource->curPacketRTPSeqNum();
-    }
-}
-
-void BackchannelServerMediaSubsession::deleteStream(unsigned clientSessionId, void *&streamToken)
-{
-    BackchannelStreamState *state = (BackchannelStreamState *) streamToken;
-    if (state != nullptr)
-    {
-        // Deleting the state object triggers its destructor for cleanup
-        delete state;
-        streamToken = nullptr;
-    }
-    // Base class deleteStream is not called as we manage our own state object type
-}
-
-void BackchannelServerMediaSubsession::getRTPSinkandRTCP(void *streamToken,
-                                                         RTPSink *&rtpSink,
-                                                         RTCPInstance *&rtcp)
-{
-    // This subsession only receives, so no RTPSink. RTCP is managed by BackchannelStreamState.
-    rtpSink = nullptr;
-
-    BackchannelStreamState *state = (BackchannelStreamState *) streamToken;
-    if (state != nullptr)
-    {
-        rtcp = state->rtcpInstance;
-        LOG_DEBUG("getRTPSinkandRTCP: Found RTCP instance "
-                  << (int) rtcp << " via BackchannelStreamState for session "
-                  << state->clientSessionId);
-    }
-    else
-    {
-        rtcp = nullptr;
-    }
-}
-
-int BackchannelServerMediaSubsession::estimatedBitrate()
-{
-    if (fFormat == IMPBackchannelFormat::OPUS)
-    {
-        return cfg->audio.output_sample_rate / 333;
-    }
-    else
-    {
-        return 64;
-    }
-}
-
-FramedSource *BackchannelServerMediaSubsession::createNewStreamSource(unsigned /*clientSessionId*/,
-                                                                      unsigned & /*estBitrate */)
-{
-    // This subsession receives, it doesn't provide a source to an RTPSink.
-    return nullptr;
-}
-
-RTPSink *BackchannelServerMediaSubsession::createNewRTPSink(Groupsock * /*rtpGroupsock*/,
-                                                            unsigned char /*rtpPayloadTypeIfDynamic*/,
-                                                            FramedSource * /*inputSource*/)
-{
-    // This subsession receives, it doesn't create an RTPSink for sending.
-    return nullptr;
+    // Success: Assign the state object to the stream token
+    streamToken = (void *) state;
 }
 
 bool BackchannelServerMediaSubsession::allocateUdpPorts(Port &serverRTPPort,
@@ -429,4 +357,85 @@ bool BackchannelServerMediaSubsession::allocateUdpPorts(Port &serverRTPPort,
                                                         << ntohs(serverRTCPPort.num()));
         return True; // Success
     }
+}
+
+void BackchannelServerMediaSubsession::startStream(
+    unsigned clientSessionId,
+    void *streamToken,
+    TaskFunc *rtcpRRHandler,
+    void *rtcpRRHandlerClientData,
+    unsigned short &rtpSeqNum,
+    unsigned &rtpTimestamp,
+    ServerRequestAlternativeByteHandler *serverRequestAlternativeByteHandler,
+    void *serverRequestAlternativeByteHandlerClientData)
+{
+    BackchannelStreamState *state = (BackchannelStreamState *) streamToken;
+
+    if (state == nullptr)
+    {
+        LOG_DEBUG("Client setup/probe initiated (NULL streamToken) for session " << clientSessionId);
+        return;
+    }
+
+    state->startPlaying(rtcpRRHandler,
+                        rtcpRRHandlerClientData,
+                        serverRequestAlternativeByteHandler,
+                        serverRequestAlternativeByteHandlerClientData);
+
+    // Set initial RTP seq num and timestamp
+    rtpSeqNum = 0;
+    rtpTimestamp = 0;
+    RTPSource *rtpSource = state->rtpSource;
+    if (rtpSource != nullptr)
+    {
+        rtpSeqNum = rtpSource->curPacketMarkerBit() ? (rtpSource->curPacketRTPSeqNum() + 1)
+                                                    : rtpSource->curPacketRTPSeqNum();
+    }
+}
+
+void BackchannelServerMediaSubsession::deleteStream(unsigned clientSessionId, void *&streamToken)
+{
+    BackchannelStreamState *state = (BackchannelStreamState *) streamToken;
+    if (state != nullptr)
+    {
+        // Deleting the state object triggers its destructor for cleanup
+        delete state;
+        streamToken = nullptr;
+    }
+}
+
+void BackchannelServerMediaSubsession::getRTPSinkandRTCP(void *streamToken,
+                                                         RTPSink *&rtpSink,
+                                                         RTCPInstance *&rtcp)
+{
+    // This subsession only receives, so no RTPSink or RTCP for sending.
+    rtpSink = nullptr;
+    rtcp = nullptr;
+}
+
+int BackchannelServerMediaSubsession::estimatedBitrate()
+{
+    if (fFormat == IMPBackchannelFormat::OPUS)
+    {
+        return cfg->audio.output_sample_rate / 333;
+    }
+    else
+    {
+        return 64;
+    }
+}
+
+FramedSource *BackchannelServerMediaSubsession::createNewStreamSource(unsigned /*clientSessionId*/,
+                                                                      unsigned & /*estBitrate */)
+{
+    // This subsession receives, it doesn't provide a source to an RTPSink.
+    return nullptr;
+}
+
+RTPSink *BackchannelServerMediaSubsession::createNewRTPSink(Groupsock * /*rtpGroupsock*/,
+                                                            unsigned char /*rtpPayloadTypeIfDynamic*/,
+                                                            FramedSource * /*inputSource*/)
+{
+    // This subsession receives, it doesn't create an RTPSink for sending.
+    return nullptr;
 }

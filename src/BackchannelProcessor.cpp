@@ -349,7 +349,7 @@ void BackchannelProcessor::run()
             continue;
         }
 
-        // --- Data Frame Handling ---
+        // Handle Playback Frame (Data)
         if (currentSessionId == 0)
         {
             // No current session, this frame's sender becomes the current one
@@ -404,5 +404,5 @@ void BackchannelProcessor::run()
     }
 
     LOG_INFO("Processor thread stopping.");
-    closePipe(); // Ensure pipe is closed on exit
+    closePipe();
 }
