@@ -4,18 +4,15 @@
 #include <memory>
 #include <functional>
 #include <atomic>
-#include <vector>      // Added for std::vector
-#include <semaphore>   // Added for std::binary_semaphore
 #include "liveMedia.hh"
 
 #include "MsgChannel.hpp"
 #include "IMPAudio.hpp"
 #include "IMPEncoder.hpp"
 #include "IMPFramesource.hpp"
-#include "IMPBackchannel.hpp" // Include definition for IMPBackchannelFormat
+#include "IMPBackchannel.hpp"
 
 #define MSG_CHANNEL_SIZE 20
-#define BACKCHANNEL_QUEUE_SIZE 30 // Define queue size for backchannel
 #define NUM_AUDIO_CHANNELS 1
 #define NUM_VIDEO_CHANNELS 2
 
@@ -38,11 +35,10 @@ struct H264NALUnit
     */
 };
 
-// Struct for parsed backchannel audio data
 struct BackchannelFrame
 {
-	std::vector<uint8_t> payload; // Raw audio payload (e.g., PCMU, PCMA)
-	IMPBackchannelFormat format;  // Use the enum type for format
+    std::vector<uint8_t> payload; // Raw audio payload (e.g., PCMU, PCMA)
+    IMPBackchannelFormat format;  // Use the enum type for format
     unsigned int clientSessionId; // Added to identify the source sink
 };
 
@@ -128,7 +124,7 @@ struct video_stream
     video_stream(int encChn, _stream *stream, const char *name)
         : encChn(encChn), stream(stream), name(name), running(false), idr(false), idr_fix(0), imp_encoder(nullptr), imp_framesource(nullptr),
           msgChannel(std::make_shared<MsgChannel<H264NALUnit>>(MSG_CHANNEL_SIZE)), onDataCallback(nullptr),  run_for_jpeg{false},
-           hasDataCallback{false} {}
+            hasDataCallback{false} {}
  };
 
  // Structure for Backchannel Processing State
@@ -136,11 +132,11 @@ struct video_stream
  {
      std::shared_ptr<MsgChannel<BackchannelFrame>> inputQueue;
      IMPBackchannel* imp_backchannel;
-     std::atomic<bool> running;
+     bool running;
      pthread_t thread;
 
      backchannel_stream()
-         : inputQueue(std::make_shared<MsgChannel<BackchannelFrame>>(BACKCHANNEL_QUEUE_SIZE)),
+         : inputQueue(std::make_shared<MsgChannel<BackchannelFrame>>(MSG_CHANNEL_SIZE)),
            imp_backchannel(nullptr),
            running(false) {}
  };
@@ -158,9 +154,9 @@ extern bool global_main_thread_signal;
 extern bool global_motion_thread_signal;
 extern std::atomic<char> global_rtsp_thread_signal;
 
- extern std::shared_ptr<jpeg_stream> global_jpeg[NUM_VIDEO_CHANNELS];
- extern std::shared_ptr<audio_stream> global_audio[NUM_AUDIO_CHANNELS];
- extern std::shared_ptr<video_stream> global_video[NUM_VIDEO_CHANNELS];
- extern std::shared_ptr<backchannel_stream> global_backchannel; // Added global instance
+extern std::shared_ptr<jpeg_stream> global_jpeg[NUM_VIDEO_CHANNELS];
+extern std::shared_ptr<audio_stream> global_audio[NUM_AUDIO_CHANNELS];
+extern std::shared_ptr<video_stream> global_video[NUM_VIDEO_CHANNELS];
+extern std::shared_ptr<backchannel_stream> global_backchannel;
 
- #endif // GLOBALS_HPP
+#endif // GLOBALS_HPP

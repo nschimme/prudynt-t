@@ -80,7 +80,8 @@ void RTSP::addSubsession(int chnNr, _stream &stream)
         LOG_INFO("Audio stream " << chnNr << " added to session");
     }
 
-    if (cfg->audio.output_enabled && stream.audio_enabled) {
+    if (cfg->audio.output_enabled && stream.audio_enabled)
+    {
         #define ADD_BACKCHANNEL_SUBSESSION(EnumName, NameString, PayloadType, Frequency, MimeType) \
             { \
                 BackchannelServerMediaSubsession* backchannelSub = \
@@ -175,13 +176,12 @@ void RTSP::start()
     LOG_DEBUG("Stop RTSP Server.");
 
     // Cleanup RTSP server and environment
-    Medium::close(rtspServer); // Close RTSP server first
-
-    env->reclaim(); // Reclaim environment *after* closing sink
+    Medium::close(rtspServer);
+    env->reclaim();
     delete scheduler;
 }
 
-void *RTSP::run(void* arg) {
+void* RTSP::run(void* arg) {
     ((RTSP*)arg)->start();
     return nullptr;
 }

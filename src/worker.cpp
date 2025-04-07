@@ -1,5 +1,5 @@
 #include "worker.hpp"
-#include "BackchannelProcessor.hpp" // Added include
+#include "BackchannelProcessor.hpp"
 #include "Motion.hpp"
 #include "AudioReframer.hpp"
 #include <cmath>
@@ -860,12 +860,6 @@ void *Worker::backchannel_processor(void *arg)
     LOG_INFO("Backchannel processor thread starting...");
 
     StartHelper *sh = static_cast<StartHelper *>(arg);
-
-    if (!global_backchannel) {
-        LOG_ERROR("global_backchannel is null. Backchannel processor cannot start. Exiting.");
-        return nullptr;
-    }
-
     global_backchannel->imp_backchannel = IMPBackchannel::createNew();
  
     BackchannelProcessor processor;

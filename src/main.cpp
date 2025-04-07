@@ -113,6 +113,7 @@ int main(int argc, const char *argv[])
 
     while (true)
     {
+        global_restart = true;
 #if defined(AUDIO_SUPPORT)
         if (cfg->audio.output_enabled && (global_restart_audio || startup))
         {
@@ -123,7 +124,6 @@ int main(int argc, const char *argv[])
              sh.has_started.acquire();
         }
 
-        global_restart = true;
         if (cfg->audio.input_enabled && (global_restart_audio || startup))
         {
             StartHelper sh{0};
@@ -174,7 +174,6 @@ int main(int argc, const char *argv[])
             LOG_DEBUG_OR_ERROR(ret, "create rtsp thread");
         }
 
-
         /* we should wait a short period to ensure all services are up
          * and running, additionally we add the timespan which is configured as 
          * OSD startup delay.
@@ -217,7 +216,8 @@ int main(int argc, const char *argv[])
         }
 
         // stop backchannel
-        if (global_backchannel && global_restart_audio) {
+        if (global_backchannel && global_restart_audio)
+        {
              global_backchannel->running = false;
              int ret = pthread_join(backchannel_thread, NULL);
              LOG_DEBUG_OR_ERROR(ret, "join backchannel processor thread");
@@ -268,7 +268,7 @@ int main(int argc, const char *argv[])
                 LOG_DEBUG_OR_ERROR(ret, "join stream0 thread");
             }
         }
-    } // end while(true)
+    }
 
     return 0;
 }
