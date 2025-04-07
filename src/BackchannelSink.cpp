@@ -1,33 +1,34 @@
 #include "BackchannelSink.hpp"
 
-#include <RTPSource.hh>
-// #include <arpa/inet.h> // Cline: Commented out unused header
-// #include <atomic>      // Cline: Commented out unused header
-// #include <iomanip>     // Cline: Commented out unused header
-// #include <sstream>     // Cline: Commented out unused header
-// #include <sys/time.h>  // Cline: Commented out unused header (likely included via liveMedia)
-#include <vector>
-
 #include "Logger.hpp"
 #include "globals.hpp"
 
+#include <RTPSource.hh>
+#include <vector>
+
 #define MODULE "BackchannelSink"
 
-#define TIMEOUT_SECONDS 5
+#define TIMEOUT_MICROSECONDS 500000 // Timeout set to 500ms
 
-BackchannelSink *BackchannelSink::createNew(UsageEnvironment &env, unsigned clientSessionId,
+BackchannelSink *BackchannelSink::createNew(UsageEnvironment &env,
+                                            unsigned clientSessionId,
                                             IMPBackchannelFormat format)
 {
     return new BackchannelSink(env, clientSessionId, format);
 }
 
-BackchannelSink::BackchannelSink(UsageEnvironment &env, unsigned clientSessionId,
+BackchannelSink::BackchannelSink(UsageEnvironment &env,
+                                 unsigned clientSessionId,
                                  IMPBackchannelFormat format)
-    : MediaSink(env), fRTPSource(nullptr),
-      fReceiveBufferSize((format == IMPBackchannelFormat::OPUS) ? 2048 : 1024), fIsActive(False),
-      fAfterFunc(nullptr), fAfterClientData(nullptr),
-      fClientSessionId(clientSessionId), fTimeoutTask(nullptr),
-      fFormat(format)
+    : MediaSink(env)
+    , fRTPSource(nullptr)
+    , fReceiveBufferSize((format == IMPBackchannelFormat::OPUS) ? 2048 : 1024)
+    , fIsActive(False)
+    , fAfterFunc(nullptr)
+    , fAfterClientData(nullptr)
+    , fClientSessionId(clientSessionId)
+    , fTimeoutTask(nullptr)
+    , fFormat(format)
 {
     LOG_DEBUG("Sink created for session " << fClientSessionId << " format "
                                           << static_cast<int>(fFormat));
@@ -45,7 +46,8 @@ BackchannelSink::~BackchannelSink()
     delete[] fReceiveBuffer;
 }
 
-Boolean BackchannelSink::startPlaying(FramedSource &source, MediaSink::afterPlayingFunc *afterFunc,
+Boolean BackchannelSink::startPlaying(FramedSource &source,
+                                      MediaSink::afterPlayingFunc *afterFunc,
                                       void *afterClientData)
 {
     if (fIsActive)
@@ -59,7 +61,7 @@ Boolean BackchannelSink::startPlaying(FramedSource &source, MediaSink::afterPlay
     fAfterClientData = afterClientData;
     fIsActive = True;
 
-    LOG_INFO("Sink starting consumption for session " << fClientSessionId);
+    LOG_DEBUG("Sink starting consumption for session " << fClientSessionId);
 
     return continuePlaying();
 }
@@ -71,7 +73,7 @@ void BackchannelSink::stopPlaying()
         return;
     }
 
-    LOG_INFO("Sink stopping consumption for session " << fClientSessionId);
+    LOG_DEBUG("Sink stopping consumption for session " << fClientSessionId);
 
     // Set inactive *first* to prevent re-entrancy
     fIsActive = False;
@@ -109,14 +111,20 @@ Boolean BackchannelSink::continuePlaying()
         return False;
     }
 
-    fRTPSource->getNextFrame(fReceiveBuffer, fReceiveBufferSize, afterGettingFrame, this,
-                             staticOnSourceClosure, this);
+    fRTPSource->getNextFrame(fReceiveBuffer,
+                             fReceiveBufferSize,
+                             afterGettingFrame,
+                             this,
+                             staticOnSourceClosure,
+                             this);
 
     return True;
 }
 
-void BackchannelSink::afterGettingFrame(void *clientData, unsigned frameSize,
-                                        unsigned numTruncatedBytes, struct timeval presentationTime,
+void BackchannelSink::afterGettingFrame(void *clientData,
+                                        unsigned frameSize,
+                                        unsigned numTruncatedBytes,
+                                        struct timeval presentationTime,
                                         unsigned /*durationInMicroseconds*/)
 {
     BackchannelSink *sink = static_cast<BackchannelSink *>(clientData);
@@ -130,7 +138,8 @@ void BackchannelSink::afterGettingFrame(void *clientData, unsigned frameSize,
     }
 }
 
-void BackchannelSink::afterGettingFrame1(unsigned frameSize, unsigned numTruncatedBytes,
+void BackchannelSink::afterGettingFrame1(unsigned frameSize,
+                                         unsigned numTruncatedBytes,
                                          struct timeval presentationTime)
 {
     if (!fIsActive)
@@ -146,7 +155,6 @@ void BackchannelSink::afterGettingFrame1(unsigned frameSize, unsigned numTruncat
     }
     else if (frameSize > 0)
     {
-        // Send the frame using the helper function
         sendBackchannelFrame(fReceiveBuffer, frameSize);
     }
 
@@ -164,8 +172,9 @@ void BackchannelSink::afterGettingFrame1(unsigned frameSize, unsigned numTruncat
 
 void BackchannelSink::scheduleTimeoutCheck()
 {
-    fTimeoutTask = envir().taskScheduler().scheduleDelayedTask(TIMEOUT_SECONDS * 1000000,
-                                                               (TaskFunc *)timeoutCheck, this);
+    fTimeoutTask = envir().taskScheduler().scheduleDelayedTask(TIMEOUT_MICROSECONDS,
+                                                               (TaskFunc *) timeoutCheck,
+                                                               this);
 }
 
 void BackchannelSink::timeoutCheck(void *clientData)
@@ -186,12 +195,11 @@ void BackchannelSink::timeoutCheck1()
         return;
     }
 
-    LOG_WARN("Audio data timeout detected for session "
+    LOG_INFO("Audio data timeout detected for session "
              << fClientSessionId << ". Sending stop signal and stopping sink.");
     sendBackchannelStopFrame();
 }
 
-// Helper function to send a regular backchannel frame
 void BackchannelSink::sendBackchannelFrame(const uint8_t *payload, unsigned payloadSize)
 {
     if (global_backchannel && global_backchannel->inputQueue)
@@ -214,13 +222,12 @@ void BackchannelSink::sendBackchannelFrame(const uint8_t *payload, unsigned payl
     }
 }
 
-// Helper function to send the zero-payload stop frame (renamed)
 void BackchannelSink::sendBackchannelStopFrame()
 {
     if (global_backchannel && global_backchannel->inputQueue)
     {
         BackchannelFrame stopFrame;
-        stopFrame.format = fFormat; // Use the sink's format
+        stopFrame.format = fFormat;
         stopFrame.clientSessionId = fClientSessionId;
         stopFrame.payload.clear(); // Zero-size payload indicates stop/timeout
         if (!global_backchannel->inputQueue->write(std::move(stopFrame)))
@@ -246,7 +253,7 @@ void BackchannelSink::staticOnSourceClosure(void *clientData)
     BackchannelSink *sink = static_cast<BackchannelSink *>(clientData);
     if (sink != nullptr)
     {
-        sink->onSourceClosure1();
+        sink->stopPlaying();
     }
     else
     {
@@ -256,16 +263,7 @@ void BackchannelSink::staticOnSourceClosure(void *clientData)
 
 void BackchannelSink::onSourceClosure1()
 {
-    LOG_INFO("Source closure detected for session " << getClientSessionId()
-                                                    << ". Scheduling stop.");
-
-    // Schedule the actual stopPlaying call
-    envir().taskScheduler().scheduleDelayedTask(
-        0,
-        (TaskFunc *)[](void *cd) {
-            BackchannelSink *s = static_cast<BackchannelSink *>(cd);
-            if (s)
-                s->stopPlaying();
-        },
-        this);
+    LOG_DEBUG("Source closure detected for session " << getClientSessionId()
+                                                     << ". Scheduling stop.");
+    stopPlaying();
 }

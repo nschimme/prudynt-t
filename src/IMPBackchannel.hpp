@@ -3,18 +3,15 @@
 
 // Define the list of backchannel formats and their properties
 // X(EnumName, NameString, PayloadType, Frequency, MimeType)
-#define X_FOREACH_BACKCHANNEL_FORMAT(X)                                                            \
-    X(PCMU, "PCMU", 0, 8000, "audio/PCMU")                                                         \
-    X(PCMA, "PCMA", 8, 8000, "audio/PCMA")                                                         \
-    X(OPUS, "OPUS", 96, 48000, "audio/OPUS")                                                       \
+#define X_FOREACH_BACKCHANNEL_FORMAT(X) \
+    /* PCMU must come first as it is a mandatory ONVIF Profile-T format. */ \
+    X(PCMU, "PCMU", 0, 8000, "audio/PCMU") \
+    X(PCMA, "PCMA", 8, 8000, "audio/PCMA") \
+    X(OPUS, "OPUS", 96, 48000, "audio/OPUS") \
     /* Add new formats here */
 
 #define APPLY_ENUM(EnumName, NameString, PayloadType, Frequency, MimeType) EnumName,
-enum class IMPBackchannelFormat
-{
-    UNKNOWN = -1,
-    X_FOREACH_BACKCHANNEL_FORMAT(APPLY_ENUM)
-};
+enum class IMPBackchannelFormat { UNKNOWN = -1, X_FOREACH_BACKCHANNEL_FORMAT(APPLY_ENUM) };
 #undef APPLY_ENUM
 
 class IMPBackchannel

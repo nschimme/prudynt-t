@@ -1,12 +1,12 @@
 #ifndef BACKCHANNEL_PROCESSOR_HPP
 #define BACKCHANNEL_PROCESSOR_HPP
 
+#include "IMPBackchannel.hpp"
+#include "globals.hpp"
+
 #include <cstdint>
 #include <cstdio>
 #include <vector>
-
-#include "IMPBackchannel.hpp"
-#include "globals.hpp"
 
 class BackchannelProcessor
 {
@@ -18,13 +18,16 @@ public:
 
 private:
     static std::vector<int16_t> resampleLinear(const std::vector<int16_t> &input_pcm,
-                                               int input_rate, int output_rate);
+                                               int input_rate,
+                                               int output_rate);
 
     bool initPipe();
     void closePipe();
 
     bool processFrame(const BackchannelFrame &frame);
-    bool decodeFrame(const uint8_t *payload, size_t payloadSize, IMPBackchannelFormat format,
+    bool decodeFrame(const uint8_t *payload,
+                     size_t payloadSize,
+                     IMPBackchannelFormat format,
                      std::vector<int16_t> &outPcmBuffer);
     bool writePcmToPipe(const std::vector<int16_t> &pcmBuffer);
 

@@ -1,19 +1,13 @@
 #ifndef BACKCHANNEL_STREAM_STATE_HPP
 #define BACKCHANNEL_STREAM_STATE_HPP
 
+#include "BackchannelSink.hpp"
 #include "Logger.hpp"
+
 #include <BasicUsageEnvironment.hh>
 #include <Boolean.hh>
 #include <NetAddress.hh>
 #include <liveMedia.hh>
-
-class BackchannelServerMediaSubsession;
-class BackchannelSink;
-class RTPSource;
-class Groupsock;
-class RTCPInstance;
-class TLSState;
-class TaskScheduler;
 
 struct UdpTransportDetails
 {
@@ -31,8 +25,7 @@ struct TcpTransportDetails
 };
 
 // Union to hold either UDP or TCP specific details
-union TransportSpecificDetails
-{
+union TransportSpecificDetails {
     UdpTransportDetails u;
     TcpTransportDetails t;
 
@@ -49,17 +42,25 @@ public:
     // Constructor takes UsageEnvironment and CNAME instead of master reference
     BackchannelStreamState(UsageEnvironment &env,
                            char const *cname,
-                           RTPSource *_rtpSource, BackchannelSink *_mediaSink, Groupsock *_rtpGS,
-                           Groupsock *_rtcpGS, unsigned _clientSessionId, Boolean _isTCP,
-                           struct sockaddr_storage const &_destAddr, Port const &_rtpDestPort,
-                           Port const &_rtcpDestPort, int _tcpSocketNum,
-                           unsigned char _rtpChannelId, unsigned char _rtcpChannelId,
+                           RTPSource *_rtpSource,
+                           BackchannelSink *_mediaSink,
+                           Groupsock *_rtpGS,
+                           Groupsock *_rtcpGS,
+                           unsigned _clientSessionId,
+                           Boolean _isTCP,
+                           struct sockaddr_storage const &_destAddr,
+                           Port const &_rtpDestPort,
+                           Port const &_rtcpDestPort,
+                           int _tcpSocketNum,
+                           unsigned char _rtpChannelId,
+                           unsigned char _rtcpChannelId,
                            TLSState *_tlsState);
 
     ~BackchannelStreamState();
 
     // Configures transport and starts the sink playing
-    void startPlaying(TaskFunc *rtcpRRHandler, void *rtcpRRHandlerClientData,
+    void startPlaying(TaskFunc *rtcpRRHandler,
+                      void *rtcpRRHandlerClientData,
                       ServerRequestAlternativeByteHandler *serverRequestAlternativeByteHandler,
                       void *serverRequestAlternativeByteHandlerClientData);
 

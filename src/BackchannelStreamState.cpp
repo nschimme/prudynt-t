@@ -1,27 +1,38 @@
 #include "BackchannelStreamState.hpp"
 
-#include <cstring>
-#include <liveMedia.hh>
-
-// #include "BackchannelServerMediaSubsession.hpp" // Cline: Commented out potentially unused header
 #include "BackchannelSink.hpp"
 #include "Logger.hpp"
 
+#include <cstring>
+#include <liveMedia.hh>
+
 #define MODULE "BackchannelStreamState"
 
-BackchannelStreamState::BackchannelStreamState(UsageEnvironment &env, char const *cname,
-                                               RTPSource *_rtpSource, BackchannelSink *_mediaSink,
-                                               Groupsock *_rtpGS, Groupsock *_rtcpGS,
-                                               unsigned _clientSessionId, Boolean _isTCP,
+BackchannelStreamState::BackchannelStreamState(UsageEnvironment &env,
+                                               char const *cname,
+                                               RTPSource *_rtpSource,
+                                               BackchannelSink *_mediaSink,
+                                               Groupsock *_rtpGS,
+                                               Groupsock *_rtcpGS,
+                                               unsigned _clientSessionId,
+                                               Boolean _isTCP,
                                                struct sockaddr_storage const &_destAddr,
-                                               Port const &_rtpDestPort, Port const &_rtcpDestPort,
-                                               int _tcpSocketNum, unsigned char _rtpChannelId,
-                                               unsigned char _rtcpChannelId, TLSState *_tlsState)
-    : fEnv(env), fCNAME(cname),
-      rtpSource(_rtpSource), mediaSink(_mediaSink), rtpGS(_rtpGS), rtcpGS(_rtcpGS),
-      rtcpInstance(nullptr), clientSessionId(_clientSessionId), fIsTCP(_isTCP)
+                                               Port const &_rtpDestPort,
+                                               Port const &_rtcpDestPort,
+                                               int _tcpSocketNum,
+                                               unsigned char _rtpChannelId,
+                                               unsigned char _rtcpChannelId,
+                                               TLSState *_tlsState)
+    : fEnv(env)
+    , fCNAME(cname)
+    , rtpSource(_rtpSource)
+    , mediaSink(_mediaSink)
+    , rtpGS(_rtpGS)
+    , rtcpGS(_rtcpGS)
+    , rtcpInstance(nullptr)
+    , clientSessionId(_clientSessionId)
+    , fIsTCP(_isTCP)
 {
-    LOG_DEBUG("Created for session " << clientSessionId << " (TCP: " << fIsTCP << ")"); // Cline: Uncommented DEBUG log
     // Initialize the appropriate part of the transport union
     if (fIsTCP)
     {
@@ -37,10 +48,9 @@ BackchannelStreamState::BackchannelStreamState(UsageEnvironment &env, char const
         fTransport.u.rtcpDestPort = _rtcpDestPort;
     }
 }
-
 BackchannelStreamState::~BackchannelStreamState()
 {
-    LOG_DEBUG("Destroyed for session " << clientSessionId); // Cline: Uncommented DEBUG log
+    LOG_DEBUG("Destroyed for session " << clientSessionId);
     Medium::close(rtcpInstance);
 
     if (mediaSink && rtpSource)
@@ -60,16 +70,21 @@ BackchannelStreamState::~BackchannelStreamState()
 }
 
 void BackchannelStreamState::startPlaying(
-    TaskFunc *rtcpRRHandler, void *rtcpRRHandlerClientData,
+    TaskFunc *rtcpRRHandler,
+    void *rtcpRRHandlerClientData,
     ServerRequestAlternativeByteHandler *serverRequestAlternativeByteHandler,
     void *serverRequestAlternativeByteHandlerClientData)
 {
     if (mediaSink && rtpSource)
     {
         // Create RTCP instance using stored env and CNAME
-        rtcpInstance =
-            RTCPInstance::createNew(fEnv, rtcpGS, 64 /*est BW kbps*/, (unsigned char *)fCNAME,
-                                    nullptr /*sink*/, rtpSource /*source*/, True /*is server*/);
+        rtcpInstance = RTCPInstance::createNew(fEnv,
+                                               rtcpGS,
+                                               64 /*est BW kbps*/,
+                                               (unsigned char *) fCNAME,
+                                               nullptr /*sink*/,
+                                               rtpSource /*source*/,
+                                               True /*is server*/);
         if (rtcpInstance)
         {
             rtcpInstance->setRRHandler(rtcpRRHandler, rtcpRRHandlerClientData);
@@ -77,38 +92,50 @@ void BackchannelStreamState::startPlaying(
             // Configure transport based on stored flag and union data
             if (fIsTCP)
             {
-                LOG_DEBUG("Configuring stream for TCP (socket " << fTransport.t.tcpSocketNum << ", RTP ch " << (int)fTransport.t.rtpChannelId << ", RTCP ch " << (int)fTransport.t.rtcpChannelId << ")"); // Cline: Uncommented DEBUG log
-                rtpSource->setStreamSocket(fTransport.t.tcpSocketNum, fTransport.t.rtpChannelId,
+                LOG_INFO("Configuring stream for TCP (session "
+                         << clientSessionId << ", socket " << fTransport.t.tcpSocketNum
+                         << ", RTP ch " << (int) fTransport.t.rtpChannelId << ", RTCP ch "
+                         << (int) fTransport.t.rtcpChannelId << ")");
+                rtpSource->setStreamSocket(fTransport.t.tcpSocketNum,
+                                           fTransport.t.rtpChannelId,
                                            fTransport.t.tlsState);
-                rtcpInstance->addStreamSocket(fTransport.t.tcpSocketNum, fTransport.t.rtcpChannelId,
+                rtcpInstance->addStreamSocket(fTransport.t.tcpSocketNum,
+                                              fTransport.t.rtcpChannelId,
                                               fTransport.t.tlsState);
 
                 // Use stored env
                 RTPInterface::setServerRequestAlternativeByteHandler(
-                    fEnv, fTransport.t.tcpSocketNum, serverRequestAlternativeByteHandler,
+                    fEnv,
+                    fTransport.t.tcpSocketNum,
+                    serverRequestAlternativeByteHandler,
                     serverRequestAlternativeByteHandlerClientData);
 
                 // Set specific RR handler for TCP
                 struct sockaddr_storage tcpSocketNumAsAddress;
                 memset(&tcpSocketNumAsAddress, 0, sizeof(tcpSocketNumAsAddress));
                 tcpSocketNumAsAddress.ss_family = AF_INET;
-                ((struct sockaddr_in &)tcpSocketNumAsAddress).sin_addr.s_addr =
-                    htonl(fTransport.t.tcpSocketNum);
+                ((struct sockaddr_in &) tcpSocketNumAsAddress).sin_addr.s_addr = htonl(
+                    fTransport.t.tcpSocketNum);
                 rtcpInstance->setSpecificRRHandler(tcpSocketNumAsAddress,
-                                                   fTransport.t.rtcpChannelId, rtcpRRHandler,
+                                                   fTransport.t.rtcpChannelId,
+                                                   rtcpRRHandler,
                                                    rtcpRRHandlerClientData);
             }
             else
             { // UDP
-                LOG_DEBUG("Configuring stream for UDP"); // Cline: Uncommented DEBUG log
+                LOG_INFO("Configuring stream for UDP (session " << clientSessionId << ")");
                 if (rtpGS)
-                    rtpGS->addDestination(fTransport.u.destAddr, fTransport.u.rtpDestPort,
+                    rtpGS->addDestination(fTransport.u.destAddr,
+                                          fTransport.u.rtpDestPort,
                                           clientSessionId);
                 if (rtcpGS)
-                    rtcpGS->addDestination(fTransport.u.destAddr, fTransport.u.rtcpDestPort,
+                    rtcpGS->addDestination(fTransport.u.destAddr,
+                                           fTransport.u.rtcpDestPort,
                                            clientSessionId);
-                rtcpInstance->setSpecificRRHandler(fTransport.u.destAddr, fTransport.u.rtcpDestPort,
-                                                   rtcpRRHandler, rtcpRRHandlerClientData);
+                rtcpInstance->setSpecificRRHandler(fTransport.u.destAddr,
+                                                   fTransport.u.rtcpDestPort,
+                                                   rtcpRRHandler,
+                                                   rtcpRRHandlerClientData);
             }
 
             rtcpInstance->sendReport(); // Send initial RTCP report
@@ -119,16 +146,11 @@ void BackchannelStreamState::startPlaying(
         }
 
         // Connect the sink to the source
-        LOG_INFO("Connecting Sink to Source for session " << clientSessionId);
         if (!mediaSink->startPlaying(*rtpSource, nullptr, this))
         {
             LOG_ERROR("mediaSink->startPlaying failed for client session " << clientSessionId);
             Medium::close(rtcpInstance);
             rtcpInstance = nullptr;
-        }
-        else
-        {
-            LOG_INFO("Connected Sink to Source for session " << clientSessionId);
         }
     }
     else

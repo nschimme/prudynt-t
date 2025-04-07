@@ -1,26 +1,27 @@
 #include "BackchannelProcessor.hpp"
 
+#include "Logger.hpp"
+#include "globals.hpp"
+
 #include <cassert>
 #include <cerrno>
-// #include <chrono> // Cline: Commented out potentially unused header
 #include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <fcntl.h>
-#include <imp/imp_audio.h>
-#include <sys/wait.h>
 #include <unistd.h>
 #include <vector>
 
-#include "Logger.hpp"
-#include "globals.hpp"
+#include <imp/imp_audio.h>
+#include <sys/wait.h>
 
 #define MODULE "BackchannelProcessor"
 
 BackchannelProcessor::BackchannelProcessor()
-    : currentSessionId(0), fPipe(nullptr), fPipeFd(-1)
-{
-}
+    : currentSessionId(0)
+    , fPipe(nullptr)
+    , fPipeFd(-1)
+{}
 
 BackchannelProcessor::~BackchannelProcessor()
 {
@@ -29,18 +30,31 @@ BackchannelProcessor::~BackchannelProcessor()
 
 static int getFrequency(IMPBackchannelFormat format)
 {
-#define RETURN_FREQUENCY(EnumName, NameString, PayloadType, Frequency, MimeType)                   \
-    {                                                                                              \
-        if (IMPBackchannelFormat::EnumName == format)                                              \
-            return Frequency;                                                                      \
+#define RETURN_FREQUENCY(EnumName, NameString, PayloadType, Frequency, MimeType) \
+    { \
+        if (IMPBackchannelFormat::EnumName == format) \
+            return Frequency; \
     }
     X_FOREACH_BACKCHANNEL_FORMAT(RETURN_FREQUENCY)
 #undef RETURN_FREQUENCY
-    abort();
+    return 8000;
+}
+
+static const char *getFormatName(IMPBackchannelFormat format)
+{
+#define RETURN_NAME(EnumName, NameString, PayloadType, Frequency, MimeType) \
+    { \
+        if (IMPBackchannelFormat::EnumName == format) \
+            return NameString; \
+    }
+    X_FOREACH_BACKCHANNEL_FORMAT(RETURN_NAME)
+#undef RETURN_NAME
+    return "UNKNOWN";
 }
 
 std::vector<int16_t> BackchannelProcessor::resampleLinear(const std::vector<int16_t> &input_pcm,
-                                                          int input_rate, int output_rate)
+                                                          int input_rate,
+                                                          int output_rate)
 {
     assert(input_rate != output_rate);
 
@@ -66,8 +80,8 @@ std::vector<int16_t> BackchannelProcessor::resampleLinear(const std::vector<int1
 
         double factor = input_pos - static_cast<double>(index1);
 
-        double interpolated_sample =
-            static_cast<double>(sample1) * (1.0 - factor) + static_cast<double>(sample2) * factor;
+        double interpolated_sample = static_cast<double>(sample1) * (1.0 - factor)
+                                     + static_cast<double>(sample2) * factor;
 
         if (interpolated_sample > INT16_MAX)
             interpolated_sample = INT16_MAX;
@@ -87,7 +101,7 @@ bool BackchannelProcessor::initPipe()
         LOG_DEBUG("Pipe already initialized.");
         return true;
     }
-    LOG_INFO("Opening pipe to: /bin/iac -s");
+    LOG_DEBUG("Opening pipe to: /bin/iac -s");
     fPipe = popen("/bin/iac -s", "w");
     if (fPipe == nullptr)
     {
@@ -119,7 +133,7 @@ bool BackchannelProcessor::initPipe()
         return false;
     }
 
-    LOG_INFO("Pipe opened successfully (fd=" << fPipeFd << ").");
+    LOG_DEBUG("Pipe opened successfully (fd=" << fPipeFd << ").");
     return true;
 }
 
@@ -127,7 +141,7 @@ void BackchannelProcessor::closePipe()
 {
     if (fPipe)
     {
-        LOG_INFO("Closing pipe (fd=" << fPipeFd << ").");
+        LOG_DEBUG("Closing pipe (fd=" << fPipeFd << ").");
         int ret = pclose(fPipe);
         fPipe = nullptr;
         fPipeFd = -1;
@@ -139,7 +153,7 @@ void BackchannelProcessor::closePipe()
         {
             if (WIFEXITED(ret))
             {
-                LOG_INFO("Pipe process exited with status: " << WEXITSTATUS(ret));
+                LOG_DEBUG("Pipe process exited with status: " << WEXITSTATUS(ret));
             }
             else if (WIFSIGNALED(ret))
             {
@@ -153,8 +167,8 @@ void BackchannelProcessor::closePipe()
     }
 }
 
-
-bool BackchannelProcessor::decodeFrame(const uint8_t *payload, size_t payloadSize,
+bool BackchannelProcessor::decodeFrame(const uint8_t *payload,
+                                       size_t payloadSize,
                                        IMPBackchannelFormat format,
                                        std::vector<int16_t> &outPcmBuffer)
 {
@@ -162,7 +176,7 @@ bool BackchannelProcessor::decodeFrame(const uint8_t *payload, size_t payloadSiz
     stream_in.stream = const_cast<uint8_t *>(payload);
     stream_in.len = static_cast<int>(payloadSize);
 
-    int adChn = (int)format;
+    int adChn = (int) format;
     int ret = IMP_ADEC_SendStream(adChn, &stream_in, BLOCK);
     if (ret != 0)
     {
@@ -216,7 +230,7 @@ bool BackchannelProcessor::writePcmToPipe(const std::vector<int16_t> &pcmBuffer)
 
     if (bytesWritten == static_cast<ssize_t>(bytesToWrite))
     {
-        // Successfully wrote all bytes
+        // All bytes written successfully
     }
     else if (bytesWritten >= 0)
     {
@@ -262,41 +276,26 @@ bool BackchannelProcessor::processFrame(const BackchannelFrame &frame)
 
     if (decoded_pcm.empty())
     {
-        LOG_DEBUG("decodeFrame returned empty PCM buffer.");
+        LOG_WARN("decodeFrame returned empty PCM buffer.");
         return true; // Nothing to process
     }
-
-    // PCM data in 'decoded_pcm' is now guaranteed to be MONO.
-    // For Opus, it was downmixed in opus_decodeFrm.
-    // For G711, it was already mono.
 
     // Resample ONLY if necessary (i.e., for non-Opus formats if rates differ)
     int input_rate = getFrequency(frame.format);
     int target_rate = cfg->audio.output_sample_rate;
-    const std::vector<int16_t> *buffer_to_write =
-        &decoded_pcm;                   // Default to using the decoded buffer
-    std::vector<int16_t> resampled_pcm; // Only used if resampling occurs
+    const std::vector<int16_t> *buffer_to_write = &decoded_pcm;
+    std::vector<int16_t> resampled_pcm;
 
     if (frame.format != IMPBackchannelFormat::OPUS && input_rate != target_rate)
     {
         // Resample the original decoded (mono) buffer for non-Opus formats
         resampled_pcm = BackchannelProcessor::resampleLinear(decoded_pcm, input_rate, target_rate);
-        buffer_to_write = &resampled_pcm; // Point to the resampled buffer
-        LOG_DEBUG("Resampled mono frame from " << input_rate << "Hz to " << target_rate << "Hz.");
-    }
-    else
-    {
-        // For Opus, or if rates match, use the decoded buffer directly.
-        // No resampling needed. Opus decoder already outputs at target_rate.
-        LOG_DEBUG("Using decoded mono frame directly (Format: " << (int)frame.format << ", Rate: "
-                                                                << input_rate << "Hz).");
+        buffer_to_write = &resampled_pcm;
     }
 
-    // Write the final mono PCM (resampled if needed) to the pipe
+    // Write the final mono PCM to the pipe
     if (buffer_to_write != nullptr && !buffer_to_write->empty())
     {
-        LOG_DEBUG("Writing " << buffer_to_write->size() << " mono samples ("
-                             << buffer_to_write->size() * sizeof(int16_t) << " bytes) to pipe...");
         if (!writePcmToPipe(*buffer_to_write))
         {
             // Error writing to pipe, likely closed. Stop processing loop.
@@ -320,10 +319,8 @@ void BackchannelProcessor::run()
     global_backchannel->running = true;
     while (global_backchannel->running)
     {
-        // Read frame directly from the queue
         BackchannelFrame frame = global_backchannel->inputQueue->wait_read();
 
-        // Check if we should stop
         if (!global_backchannel->running)
         {
             break;
@@ -332,24 +329,24 @@ void BackchannelProcessor::run()
         // Handle Zero-Payload Frame (Stop Signal)
         if (frame.payload.empty())
         {
-            LOG_INFO("Received stop signal (zero-payload) from session " << frame.clientSessionId);
+            LOG_DEBUG("Received stop signal (zero-payload) from session " << frame.clientSessionId);
             if (frame.clientSessionId == currentSessionId && currentSessionId != 0)
             {
                 LOG_INFO("Current session " << currentSessionId << " stopped. Closing pipe.");
                 closePipe();
-                currentSessionId = 0; // Reset current session
+                currentSessionId = 0;
             }
             else if (currentSessionId == 0)
             {
-                LOG_INFO("Stop signal received but no current session. Ignoring.");
+                LOG_DEBUG("Stop signal received but no current session. Ignoring.");
             }
             else
             {
-                LOG_INFO("Stop signal from non-current session "
+                LOG_WARN("Stop signal from non-current session "
                          << frame.clientSessionId << " (Current: " << currentSessionId
                          << "). Ignoring.");
             }
-            continue; // Skip processing this empty frame
+            continue;
         }
 
         // --- Data Frame Handling ---
@@ -357,21 +354,22 @@ void BackchannelProcessor::run()
         {
             // No current session, this frame's sender becomes the current one
             currentSessionId = frame.clientSessionId;
-            LOG_INFO("New current session: " << currentSessionId << ". Opening pipe.");
+            LOG_INFO("New current session " << currentSessionId << " playing "
+                                            << getFormatName(frame.format) << ". Opening pipe.");
             if (!initPipe())
             {
                 LOG_ERROR("Failed to open pipe for new session " << currentSessionId
                                                                  << ". Resetting.");
-                currentSessionId = 0; // Reset if pipe fails
-                continue;             // Skip processing this frame
+                currentSessionId = 0;
+                continue;
             }
-            // Pipe is open, proceed to process
+            // Pipe is open
             if (!processFrame(frame))
             {
                 // processFrame returns false if pipe write fails and closes pipe
                 LOG_WARN("processFrame failed for initial frame of session " << currentSessionId
                                                                              << ". Pipe closed.");
-                currentSessionId = 0; // Reset as pipe is closed
+                currentSessionId = 0;
             }
         }
         else if (frame.clientSessionId == currentSessionId)
@@ -386,16 +384,15 @@ void BackchannelProcessor::run()
                     LOG_ERROR("Failed to reopen pipe for session " << currentSessionId
                                                                    << ". Resetting.");
                     currentSessionId = 0;
-                    continue; // Skip processing this frame
+                    continue;
                 }
             }
-            // Pipe should be open, process the frame
+            // Pipe should be open
             if (!processFrame(frame))
             {
                 // processFrame returns false if pipe write fails and closes pipe
-                LOG_WARN("processFrame failed for session " << currentSessionId
-                                                            << ". Pipe closed.");
-                currentSessionId = 0; // Reset as pipe is closed
+                LOG_WARN("processFrame failed for session " << currentSessionId << ". Pipe closed.");
+                currentSessionId = 0;
             }
         }
         else
@@ -404,7 +401,7 @@ void BackchannelProcessor::run()
             LOG_DEBUG("Discarding frame from non-current session "
                       << frame.clientSessionId << " (Current: " << currentSessionId << ")");
         }
-    } // end while(running)
+    }
 
     LOG_INFO("Processor thread stopping.");
     closePipe(); // Ensure pipe is closed on exit

@@ -1,31 +1,23 @@
 #ifndef BACKCHANNEL_SINK_FRAMED_SOURCE_HPP
 #define BACKCHANNEL_SINK_FRAMED_SOURCE_HPP
 
-#include <BasicUsageEnvironment.hh>
-#include <atomic> // Keep for std::atomic member
-#include <cstdint>
-// #include <list> // Cline: Commented out unused header
-#include <liveMedia.hh>
-// #include <map> // Cline: Commented out unused header
-// #include <sys/time.h> // Cline: Commented out unused header (likely included via liveMedia)
-#include <vector> // Keep for BackchannelFrame usage in cpp
-
 #include "IMPBackchannel.hpp"
-#include "Logger.hpp" // Keep for LOG_* usage in cpp
-// #include "MsgChannel.hpp" // Cline: Commented out unused header
+#include "Logger.hpp"
 
-class FramedSource;
-class TaskScheduler;
-struct backchannel_stream;
-struct BackchannelFrame;
+#include <BasicUsageEnvironment.hh>
+#include <cstdint>
+#include <liveMedia.hh>
+#include <vector>
 
 class BackchannelSink : public MediaSink
 {
 public:
-    static BackchannelSink *createNew(UsageEnvironment &env, unsigned clientSessionId,
+    static BackchannelSink *createNew(UsageEnvironment &env,
+                                      unsigned clientSessionId,
                                       IMPBackchannelFormat format);
 
-    Boolean startPlaying(FramedSource &source, MediaSink::afterPlayingFunc *afterFunc,
+    Boolean startPlaying(FramedSource &source,
+                         MediaSink::afterPlayingFunc *afterFunc,
                          void *afterClientData);
     void stopPlaying();
 
@@ -42,9 +34,13 @@ private:
     static void timeoutCheck(void *clientData);
     void timeoutCheck1();
 
-    static void afterGettingFrame(void *clientData, unsigned frameSize, unsigned numTruncatedBytes,
-                                  struct timeval presentationTime, unsigned durationInMicroseconds);
-    void afterGettingFrame1(unsigned frameSize, unsigned numTruncatedBytes,
+    static void afterGettingFrame(void *clientData,
+                                  unsigned frameSize,
+                                  unsigned numTruncatedBytes,
+                                  struct timeval presentationTime,
+                                  unsigned durationInMicroseconds);
+    void afterGettingFrame1(unsigned frameSize,
+                            unsigned numTruncatedBytes,
                             struct timeval presentationTime);
 
     static void staticOnSourceClosure(void *clientData);
@@ -62,9 +58,6 @@ private:
     Boolean fIsActive;
     MediaSink::afterPlayingFunc *fAfterFunc;
     void *fAfterClientData;
-
-    static std::atomic<bool> gIsAudioOutputBusy;
-    bool fHaveAudioOutputLock;
 
     unsigned fClientSessionId;
     TaskToken fTimeoutTask;
