@@ -20,12 +20,13 @@ private:
     bool initPipe();
     void closePipe();
 
-    bool handleIdleState();
-    bool handleActiveState();
+    // Removed handleIdleState() and handleActiveState() declarations
 
     bool processFrame(const BackchannelFrame& frame);
     bool decodeFrame(const uint8_t* payload, size_t payloadSize, IMPBackchannelFormat format, std::vector<int16_t>& outPcmBuffer);
     bool writePcmToPipe(const std::vector<int16_t>& pcmBuffer);
+
+    unsigned int currentSessionId; // Added to track the current active session
 
     FILE* fPipe;
     int fPipeFd;

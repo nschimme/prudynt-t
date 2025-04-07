@@ -13,9 +13,9 @@
 
 #define MODULE "BackchannelSink"
 
-#define TIMEOUT_SECONDS 5
+#define TIMEOUT_SECONDS 5 // Keep timeout define
 
-std::atomic<bool> BackchannelSink::gIsAudioOutputBusy{false};
+// Removed gIsAudioOutputBusy definition
 
 BackchannelSink* BackchannelSink::createNew(UsageEnvironment& env,
                                             unsigned clientSessionId, IMPBackchannelFormat format) {
@@ -26,13 +26,13 @@ BackchannelSink::BackchannelSink(UsageEnvironment& env,
                                  unsigned clientSessionId, IMPBackchannelFormat format)
     : MediaSink(env),
       fRTPSource(nullptr),
-      fReceiveBufferSize((format == IMPBackchannelFormat::OPUS) ? 2048 : 512),
+      fReceiveBufferSize((format == IMPBackchannelFormat::OPUS) ? 2048 : 1024),
       fIsActive(False),
       fAfterFunc(nullptr),
       fAfterClientData(nullptr),
-      fHaveAudioOutputLock(false),
+      // fHaveAudioOutputLock removed
       fClientSessionId(clientSessionId),
-      fTimeoutTask(nullptr),
+      fTimeoutTask(nullptr), // Keep timeout task member
       fFormat(format)
 {
     LOG_DEBUG("Sink created for session " << fClientSessionId << " format " << static_cast<int>(fFormat));
@@ -60,17 +60,12 @@ Boolean BackchannelSink::startPlaying(FramedSource& source,
     fRTPSource = &source;
     fAfterFunc = afterFunc;
     fAfterClientData = afterClientData;
-    fHaveAudioOutputLock = false;
+    // fHaveAudioOutputLock removed
     fIsActive = True;
 
-    if (global_backchannel) {
-        int previous_count = global_backchannel->active_sessions.fetch_add(1, std::memory_order_relaxed);
-        LOG_INFO("Sink starting for session " << fClientSessionId << ". Active sessions: " << previous_count + 1);
-    } else {
-        LOG_ERROR("global_backchannel is null in startPlaying! Cannot increment session count. (Session: " << fClientSessionId << ")");
-    }
-
+    // Removed active_sessions increment
     LOG_INFO("Sink starting consumption for session " << fClientSessionId);
+
     return continuePlaying();
 }
 
@@ -81,27 +76,27 @@ void BackchannelSink::stopPlaying() {
 
     LOG_INFO("Sink stopping consumption for session " << fClientSessionId);
 
+    // Set inactive *first* to prevent re-entrancy
+    fIsActive = False;
+
+    // Send the stop signal exactly once when stopping an active sink
+    sendBackchannelStopFrame();
+
+    // Keep timeout unschedule on explicit stop
     envir().taskScheduler().unscheduleDelayedTask(fTimeoutTask);
     fTimeoutTask = nullptr;
 
-    fIsActive = False;
+    // fIsActive = False; // Moved up
 
     if (fRTPSource != nullptr) {
         fRTPSource->stopGettingFrames();
     }
 
-    if (fHaveAudioOutputLock) {
-        gIsAudioOutputBusy.store(false);
-        fHaveAudioOutputLock = false;
-        LOG_INFO("Released audio lock during stopPlaying for session " << fClientSessionId);
-    }
+    // Removed audio lock release logic
 
-    if (global_backchannel) {
-        int previous_count = global_backchannel->active_sessions.fetch_sub(1, std::memory_order_relaxed);
-        LOG_INFO("Sink stopped for session " << fClientSessionId << ". Active sessions: " << previous_count - 1);
-    } else {
-         LOG_ERROR("global_backchannel is null in stopPlaying! Cannot decrement session count. (Session: " << fClientSessionId << ")");
-    }
+    // Removed stop signal sending from stopPlaying() - it's now handled by timeout/closure
+
+    // Removed active_sessions decrement
 
     if (fAfterFunc != nullptr) {
         (*fAfterFunc)(fAfterClientData);
@@ -150,46 +145,19 @@ void BackchannelSink::afterGettingFrame1(unsigned frameSize, unsigned numTruncat
         return;
     }
 
-    if (frameSize > 0 && numTruncatedBytes == 0 && !fHaveAudioOutputLock) {
-        bool expected = false;
-        if (gIsAudioOutputBusy.compare_exchange_strong(expected, true)) {
-            fHaveAudioOutputLock = true;
-            LOG_INFO("Acquired audio lock on first frame for session " << fClientSessionId);
-
-            LOG_DEBUG("Starting audio timeout timer for session " << fClientSessionId);
-            scheduleTimeoutCheck();
-
-        } else {
-            fHaveAudioOutputLock = false;
-            LOG_WARN("Failed to acquire audio lock (busy) for session " << fClientSessionId << ". Data received but not played.");
-        }
-    }
+    // Removed lock acquisition logic
 
     if (numTruncatedBytes > 0) {
         LOG_WARN("Received truncated frame (" << frameSize << " bytes, " << numTruncatedBytes << " truncated) for session " << fClientSessionId << ". Discarding.");
     } else if (frameSize > 0) {
-
-        BackchannelFrame bcFrame;
-        bcFrame.format = fFormat;
-        bcFrame.timestamp = presentationTime;
-        bcFrame.payload.assign(fReceiveBuffer, fReceiveBuffer + frameSize);
-
-        if (fHaveAudioOutputLock) {
-            if (global_backchannel && global_backchannel->inputQueue) {
-                if (!global_backchannel->inputQueue->write(std::move(bcFrame))) {
-                     LOG_WARN("Input queue full for session " << fClientSessionId << ". Frame dropped.");
-                }
-            } else {
-                 LOG_ERROR("global_backchannel or its input queue is null, cannot queue BackchannelFrame! (Session: " << fClientSessionId << ")");
-            }
-        } else {
-        }
+        // Send the frame using the helper function
+        sendBackchannelFrame(fReceiveBuffer, frameSize);
     }
 
-    if (fTimeoutTask != nullptr || fHaveAudioOutputLock) {
-        envir().taskScheduler().unscheduleDelayedTask(fTimeoutTask);
-        scheduleTimeoutCheck();
-    }
+    // Reschedule the timeout check after receiving any frame (even size 0 or truncated)
+    // This resets the timer as long as *something* is coming from the source.
+    envir().taskScheduler().unscheduleDelayedTask(fTimeoutTask);
+    scheduleTimeoutCheck();
 
     if (fIsActive) {
         continuePlaying();
@@ -218,17 +186,42 @@ void BackchannelSink::timeoutCheck1() {
         return;
     }
 
+    LOG_WARN("Audio data timeout detected for session " << fClientSessionId << ". Sending stop signal and stopping sink.");
+    sendBackchannelStopFrame();
+}
 
-    LOG_WARN("Audio data timeout detected for session " << fClientSessionId);
+// Helper function to send a regular backchannel frame
+void BackchannelSink::sendBackchannelFrame(const uint8_t* payload, unsigned payloadSize) {
+     if (global_backchannel && global_backchannel->inputQueue) {
+        BackchannelFrame bcFrame;
+        bcFrame.format = fFormat;
+        bcFrame.clientSessionId = fClientSessionId;
+        bcFrame.payload.assign(payload, payload + payloadSize);
 
-    if (fHaveAudioOutputLock) {
-        LOG_WARN("Releasing audio lock due to timeout for session " << fClientSessionId);
-        gIsAudioOutputBusy.store(false);
-        fHaveAudioOutputLock = false;
+        if (!global_backchannel->inputQueue->write(std::move(bcFrame))) {
+             LOG_WARN("Input queue full for session " << fClientSessionId << ". Frame dropped.");
+        }
     } else {
+         LOG_ERROR("global_backchannel or its input queue is null, cannot queue BackchannelFrame! (Session: " << fClientSessionId << ")");
     }
 }
 
+// Helper function to send the zero-payload stop frame (renamed)
+void BackchannelSink::sendBackchannelStopFrame() {
+    if (global_backchannel && global_backchannel->inputQueue) {
+        BackchannelFrame stopFrame;
+        stopFrame.format = fFormat; // Use the sink's format
+        stopFrame.clientSessionId = fClientSessionId;
+        stopFrame.payload.clear(); // Zero-size payload indicates stop/timeout
+        if (!global_backchannel->inputQueue->write(std::move(stopFrame))) {
+            LOG_WARN("Input queue full when trying to send stop signal for session " << fClientSessionId);
+        } else {
+            LOG_INFO("Sent stop signal (zero-payload frame) for session " << fClientSessionId);
+        }
+    } else {
+        LOG_ERROR("global_backchannel or input queue null, cannot send stop signal for session " << fClientSessionId);
+    }
+}
 
 void BackchannelSink::staticOnSourceClosure(void* clientData) {
     BackchannelSink* sink = static_cast<BackchannelSink*>(clientData);
@@ -240,7 +233,11 @@ void BackchannelSink::staticOnSourceClosure(void* clientData) {
 }
 
 void BackchannelSink::onSourceClosure1() {
-    LOG_INFO("Source closure detected for session " << getClientSessionId());
+    LOG_INFO("Source closure detected for session " << getClientSessionId() << ". Scheduling stop.");
+
+    // Removed sendBackchannelStopFrame() call from here; it's now handled in stopPlaying()
+
+    // Schedule the actual stopPlaying call
     envir().taskScheduler().scheduleDelayedTask(0,
         (TaskFunc*)[](void* cd) {
             BackchannelSink* s = static_cast<BackchannelSink*>(cd);

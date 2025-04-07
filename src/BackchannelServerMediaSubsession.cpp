@@ -269,7 +269,8 @@
      BackchannelStreamState* state = (BackchannelStreamState*)streamToken;
 
       if (state == nullptr) {
-          LOG_ERROR("startStream called with NULL streamToken for client session " << clientSessionId);
+          // Changed from ERROR to INFO and reworded
+          LOG_INFO("Client setup/probe initiated (NULL streamToken) for session " << clientSessionId);
           return;
       }
 

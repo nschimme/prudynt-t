@@ -43,10 +43,8 @@ struct BackchannelFrame
 {
 	std::vector<uint8_t> payload; // Raw audio payload (e.g., PCMU, PCMA)
 	IMPBackchannelFormat format;  // Use the enum type for format
-	// unsigned frequency;        // Removed: Processor will look this up via IMPBackchannel based on format
+    unsigned int clientSessionId; // Added to identify the source sink
 	struct timeval timestamp;     // Presentation timestamp from RTP header
-	// uint32_t rtpTimestamp;     // Optional: Raw RTP timestamp if needed
-	// uint16_t sequenceNumber;   // Optional: RTP sequence number if needed
 };
 
 
@@ -142,7 +140,7 @@ struct video_stream
      IMPBackchannel* imp_backchannel;
      std::atomic<bool> running;
      pthread_t thread;
-     std::atomic<int> active_sessions{0};
+     // std::atomic<int> active_sessions{0}; // Removed session counter
      std::binary_semaphore has_started{0};
 
 

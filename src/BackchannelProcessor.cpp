@@ -16,7 +16,7 @@
 #define MODULE "BackchannelProcessor"
 
 BackchannelProcessor::BackchannelProcessor()
-    : fPipe(nullptr), fPipeFd(-1)
+    : currentSessionId(0), fPipe(nullptr), fPipeFd(-1) // Reordered initializer list
 {
 }
 
@@ -126,48 +126,8 @@ void BackchannelProcessor::closePipe() {
     }
 }
 
-bool BackchannelProcessor::handleIdleState() {
-    if (fPipe) {
-        LOG_INFO("Idle: closing pipe.");
-        closePipe();
-    }
-    if (!global_backchannel) return false;
-    BackchannelFrame frame = global_backchannel->inputQueue->wait_read();
-
-    if (!global_backchannel->running) {
-        return false;
-    }
-
-    return true;
-}
-
-bool BackchannelProcessor::handleActiveState() {
-    if (!fPipe) {
-        LOG_INFO("Active session: opening pipe.");
-        if (!initPipe()) {
-            LOG_ERROR("Failed to open pipe, cannot process backchannel. Retrying...");
-            std::this_thread::sleep_for(std::chrono::seconds(2));
-            return true;
-        }
-    }
-
-    if (!global_backchannel) return false;
-    BackchannelFrame frame = global_backchannel->inputQueue->wait_read();
-
-    if (!global_backchannel->running) {
-        return false;
-    }
-
-    if (frame.payload.empty()) {
-        return true;
-    }
-
-    if (!processFrame(frame)) {
-        return false;
-    }
-
-    return true;
-}
+// Removed handleIdleState() implementation
+// Removed handleActiveState() implementation
 
 bool BackchannelProcessor::decodeFrame(const uint8_t* payload, size_t payloadSize, IMPBackchannelFormat format, std::vector<int16_t>& outPcmBuffer) {
     IMPAudioStream stream_in;
@@ -299,18 +259,67 @@ void BackchannelProcessor::run() {
 
     global_backchannel->running = true;
     while (global_backchannel->running) {
-        bool continue_loop = true;
-        if (global_backchannel->active_sessions.load(std::memory_order_relaxed) == 0) {
-            continue_loop = handleIdleState();
-        } else {
-            continue_loop = handleActiveState();
-        }
+        // Read frame directly from the queue
+        BackchannelFrame frame = global_backchannel->inputQueue->wait_read();
 
-        if (!continue_loop) {
+        // Check if we should stop
+        if (!global_backchannel->running) {
             break;
         }
-    }
+
+        // Handle Zero-Payload Frame (Stop Signal)
+        if (frame.payload.empty()) {
+            LOG_INFO("Received stop signal (zero-payload) from session " << frame.clientSessionId);
+            if (frame.clientSessionId == currentSessionId && currentSessionId != 0) {
+                LOG_INFO("Current session " << currentSessionId << " stopped. Closing pipe.");
+                closePipe();
+                currentSessionId = 0; // Reset current session
+            } else if (currentSessionId == 0) {
+                 LOG_INFO("Stop signal received but no current session. Ignoring.");
+            } else {
+                LOG_INFO("Stop signal from non-current session " << frame.clientSessionId << " (Current: " << currentSessionId << "). Ignoring.");
+            }
+            continue; // Skip processing this empty frame
+        }
+
+        // --- Data Frame Handling ---
+        if (currentSessionId == 0) {
+            // No current session, this frame's sender becomes the current one
+            currentSessionId = frame.clientSessionId;
+            LOG_INFO("New current session: " << currentSessionId << ". Opening pipe.");
+            if (!initPipe()) {
+                LOG_ERROR("Failed to open pipe for new session " << currentSessionId << ". Resetting.");
+                currentSessionId = 0; // Reset if pipe fails
+                continue; // Skip processing this frame
+            }
+            // Pipe is open, proceed to process
+            if (!processFrame(frame)) {
+                // processFrame returns false if pipe write fails and closes pipe
+                LOG_WARN("processFrame failed for initial frame of session " << currentSessionId << ". Pipe closed.");
+                currentSessionId = 0; // Reset as pipe is closed
+            }
+        } else if (frame.clientSessionId == currentSessionId) {
+            // Frame is from the current session
+            if (!fPipe) { // Ensure pipe is open (it might have closed unexpectedly)
+                 LOG_WARN("Pipe was closed unexpectedly for current session " << currentSessionId << ". Reopening.");
+                 if (!initPipe()) {
+                     LOG_ERROR("Failed to reopen pipe for session " << currentSessionId << ". Resetting.");
+                     currentSessionId = 0;
+                     continue; // Skip processing this frame
+                 }
+            }
+            // Pipe should be open, process the frame
+            if (!processFrame(frame)) {
+                // processFrame returns false if pipe write fails and closes pipe
+                 LOG_WARN("processFrame failed for session " << currentSessionId << ". Pipe closed.");
+                 currentSessionId = 0; // Reset as pipe is closed
+            }
+        } else {
+            // Frame is from a different session, ignore it
+            LOG_DEBUG("Discarding frame from non-current session " << frame.clientSessionId << " (Current: " << currentSessionId << ")");
+        }
+    } // end while(running)
 
     LOG_INFO("Processor thread stopping.");
-    closePipe();
+    closePipe(); // Ensure pipe is closed on exit
 }

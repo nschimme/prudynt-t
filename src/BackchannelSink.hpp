@@ -53,6 +53,10 @@ private:
     static void staticOnSourceClosure(void* clientData);
     void onSourceClosure1();
 
+    // Helper functions for sending frames to the processor queue
+    void sendBackchannelFrame(const uint8_t* payload, unsigned payloadSize); // No timestamp param
+    void sendBackchannelStopFrame(); // Renamed from sendStopSignal
+
     FramedSource* fRTPSource;
     u_int8_t* fReceiveBuffer;
     int fReceiveBufferSize;

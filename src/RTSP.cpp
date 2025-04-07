@@ -81,7 +81,6 @@ void RTSP::addSubsession(int chnNr, _stream &stream)
     }
 
     if (cfg->audio.output_enabled && stream.audio_enabled) {
-        /*
         #define ADD_BACKCHANNEL_SUBSESSION(EnumName, NameString, PayloadType, Frequency, MimeType) \
             { \
                 BackchannelServerMediaSubsession* backchannelSub = \
@@ -92,10 +91,6 @@ void RTSP::addSubsession(int chnNr, _stream &stream)
 
         X_FOREACH_BACKCHANNEL_FORMAT(ADD_BACKCHANNEL_SUBSESSION)
         #undef ADD_BACKCHANNEL_SUBSESSION
-        */
-       BackchannelServerMediaSubsession* backchannelSub =
-                    BackchannelServerMediaSubsession::createNew(*env, IMPBackchannelFormat::OPUS);
-                sms->addSubsession(backchannelSub);
     }
 #endif
 
