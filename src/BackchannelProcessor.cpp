@@ -274,14 +274,15 @@ bool BackchannelProcessor::processFrame(const BackchannelFrame &frame)
         return true; // Nothing to process
     }
 
-    // Resample only if necessary
+    // Resample ONLY if necessary (i.e., for non-Opus formats if rates differ)
     int input_rate = getFrequency(frame.format);
     int target_rate = cfg->audio.output_sample_rate;
     const std::vector<int16_t> *buffer_to_write = &decoded_pcm;
     std::vector<int16_t> resampled_pcm;
 
-    if (input_rate != target_rate)
+    if (frame.format != IMPBackchannelFormat::OPUS && input_rate != target_rate)
     {
+        // Resample the original decoded (mono) buffer for non-Opus formats
         resampled_pcm = resampleLinear(decoded_pcm, input_rate, target_rate);
         buffer_to_write = &resampled_pcm;
     }

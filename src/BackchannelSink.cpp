@@ -19,7 +19,7 @@ BackchannelSink::BackchannelSink(UsageEnvironment &env,
                                  IMPBackchannelFormat format)
     : MediaSink(env)
     , fRTPSource(nullptr)
-    , fReceiveBufferSize(1024)
+    , fReceiveBufferSize((format == IMPBackchannelFormat::OPUS) ? 2048 : 1024)
     , fIsActive(false)
     , fAfterFunc(nullptr)
     , fAfterClientData(nullptr)

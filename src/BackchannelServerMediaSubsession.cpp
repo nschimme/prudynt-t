@@ -69,12 +69,26 @@ char const *BackchannelServerMediaSubsession::sdpLines(int /*addressFamily*/)
         LOG_DEBUG("Generating SDP for format " << formatName << " (Payload Type: " << payloadType
                                                << ")");
 
+        std::string fmtpLine = "";
+        if (fFormat == IMPBackchannelFormat::OPUS)
+        {
+            char fmtpBuf[100];
+            snprintf(fmtpBuf,
+                     sizeof(fmtpBuf),
+                     "a=fmtp:%d stereo=1; maxplaybackrate=%d; sprop-maxcapturerate=%d\r\n",
+                     payloadType,
+                     cfg->audio.output_sample_rate,
+                     cfg->audio.output_sample_rate);
+            fmtpLine = fmtpBuf;
+        }
+
         snprintf(fSDPLines,
                  sdpLinesSize,
                  "m=audio 0 RTP/AVP %d\r\n"
                  "c=IN IP4 0.0.0.0\r\n"
                  "b=AS:%u\r\n"
                  "a=rtpmap:%d %s/%u/%d\r\n"
+                 "%s"
                  "a=control:%s\r\n"
                  "a=sendonly\r\n",
                  payloadType,
@@ -82,7 +96,10 @@ char const *BackchannelServerMediaSubsession::sdpLines(int /*addressFamily*/)
                  payloadType,
                  formatName,
                  frequency,
-                 1,
+                 (fFormat == IMPBackchannelFormat::OPUS)
+                     ? 2 // Request stereo for Opus to improve client support
+                     : 1,
+                 fmtpLine.c_str(),
                  trackId());
 
         fSDPLines[sdpLinesSize - 1] = '\0'; // Ensure null termination
@@ -390,7 +407,14 @@ void BackchannelServerMediaSubsession::getRTPSinkandRTCP(void *streamToken,
 
 int BackchannelServerMediaSubsession::estimatedBitrate()
 {
-    return 64;
+    if (fFormat == IMPBackchannelFormat::OPUS)
+    {
+        return cfg->audio.output_sample_rate / 333;
+    }
+    else
+    {
+        return 64;
+    }
 }
 
 FramedSource *BackchannelServerMediaSubsession::createNewStreamSource(unsigned /*clientSessionId*/,

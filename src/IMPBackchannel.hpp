@@ -43,6 +43,7 @@
     /* PCMU must come first as it is a mandatory ONVIF Profile-T format. */ \
     X(PCMU, "PCMU", 0, 8000, "audio/PCMU") \
     X(PCMA, "PCMA", 8, 8000, "audio/PCMA") \
+    X(OPUS, "OPUS", 96, 48000, "audio/OPUS") \
     /* Add new formats here */
 
 #define APPLY_ENUM(EnumName, NameString, PayloadType, Frequency, MimeType) EnumName,
