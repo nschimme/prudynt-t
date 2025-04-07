@@ -1,9 +1,6 @@
 #ifndef BACKCHANNEL_SINK_FRAMED_SOURCE_HPP
 #define BACKCHANNEL_SINK_FRAMED_SOURCE_HPP
 
-// Define the buffer size for receiving backchannel RTP data
-#define BACKCHANNEL_RECEIVE_BUFFER_SIZE 2048
-
 #include <liveMedia.hh>
 #include <BasicUsageEnvironment.hh>
 #include <list>
@@ -58,6 +55,7 @@ private:
 
     FramedSource* fRTPSource;
     u_int8_t* fReceiveBuffer;
+    int fReceiveBufferSize;
 
     Boolean fIsActive;
     MediaSink::afterPlayingFunc* fAfterFunc;

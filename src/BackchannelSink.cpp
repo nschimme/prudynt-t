@@ -24,6 +24,7 @@ BackchannelSink::BackchannelSink(UsageEnvironment& env,
                                  unsigned clientSessionId, IMPBackchannelFormat format)
     : MediaSink(env),
       fRTPSource(nullptr),
+      fReceiveBufferSize((format == IMPBackchannelFormat::OPUS) ? 2048 : 512),
       fIsActive(False),
       fAfterFunc(nullptr),
       fAfterClientData(nullptr),
@@ -33,7 +34,7 @@ BackchannelSink::BackchannelSink(UsageEnvironment& env,
       fFormat(format)
 {
     LOG_DEBUG("Sink created for session " << fClientSessionId << " format " << static_cast<int>(fFormat));
-    fReceiveBuffer = new u_int8_t[BACKCHANNEL_RECEIVE_BUFFER_SIZE];
+    fReceiveBuffer = new u_int8_t[fReceiveBufferSize];
     if (fReceiveBuffer == nullptr) {
         LOG_ERROR("Failed to allocate receive buffer (Session: " << fClientSessionId << ")");
     }
@@ -119,7 +120,7 @@ Boolean BackchannelSink::continuePlaying() {
         return False;
     }
 
-    fRTPSource->getNextFrame(fReceiveBuffer, BACKCHANNEL_RECEIVE_BUFFER_SIZE,
+    fRTPSource->getNextFrame(fReceiveBuffer, fReceiveBufferSize,
                              afterGettingFrame, this,
                              staticOnSourceClosure, this);
 
