@@ -4,10 +4,12 @@
 #include <cstdint>
 #include <cstdio>
 #include <vector>
-#include "globals.hpp"
-#include "IMPBackchannel.hpp"
 
-class BackchannelProcessor {
+#include "IMPBackchannel.hpp"
+#include "globals.hpp"
+
+class BackchannelProcessor
+{
 public:
     BackchannelProcessor();
     ~BackchannelProcessor();
@@ -15,24 +17,24 @@ public:
     void run();
 
 private:
-    static std::vector<int16_t> resampleLinear(const std::vector<int16_t>& input_pcm, int input_rate, int output_rate);
+    static std::vector<int16_t> resampleLinear(const std::vector<int16_t> &input_pcm,
+                                               int input_rate, int output_rate);
 
     bool initPipe();
     void closePipe();
 
-    // Removed handleIdleState() and handleActiveState() declarations
+    bool processFrame(const BackchannelFrame &frame);
+    bool decodeFrame(const uint8_t *payload, size_t payloadSize, IMPBackchannelFormat format,
+                     std::vector<int16_t> &outPcmBuffer);
+    bool writePcmToPipe(const std::vector<int16_t> &pcmBuffer);
 
-    bool processFrame(const BackchannelFrame& frame);
-    bool decodeFrame(const uint8_t* payload, size_t payloadSize, IMPBackchannelFormat format, std::vector<int16_t>& outPcmBuffer);
-    bool writePcmToPipe(const std::vector<int16_t>& pcmBuffer);
+    unsigned int currentSessionId;
 
-    unsigned int currentSessionId; // Added to track the current active session
-
-    FILE* fPipe;
+    FILE *fPipe;
     int fPipeFd;
 
-    BackchannelProcessor(const BackchannelProcessor&) = delete;
-    BackchannelProcessor& operator=(const BackchannelProcessor&) = delete;
+    BackchannelProcessor(const BackchannelProcessor &) = delete;
+    BackchannelProcessor &operator=(const BackchannelProcessor &) = delete;
 };
 
 #endif // BACKCHANNEL_PROCESSOR_HPP

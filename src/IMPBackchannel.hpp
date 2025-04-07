@@ -3,22 +3,24 @@
 
 // Define the list of backchannel formats and their properties
 // X(EnumName, NameString, PayloadType, Frequency, MimeType)
-#define X_FOREACH_BACKCHANNEL_FORMAT(X) \
-    X(OPUS, "OPUS", 96, 48000, "audio/OPUS") \
-    X(PCMU, "PCMU", 0, 8000, "audio/PCMU") \
-    X(PCMA, "PCMA", 8, 8000, "audio/PCMA") \
+#define X_FOREACH_BACKCHANNEL_FORMAT(X)                                                            \
+    X(PCMU, "PCMU", 0, 8000, "audio/PCMU")                                                         \
+    X(PCMA, "PCMA", 8, 8000, "audio/PCMA")                                                         \
+    X(OPUS, "OPUS", 96, 48000, "audio/OPUS")                                                       \
     /* Add new formats here */
 
 #define APPLY_ENUM(EnumName, NameString, PayloadType, Frequency, MimeType) EnumName,
-enum class IMPBackchannelFormat {
+enum class IMPBackchannelFormat
+{
     UNKNOWN = -1,
     X_FOREACH_BACKCHANNEL_FORMAT(APPLY_ENUM)
 };
 #undef APPLY_ENUM
 
-class IMPBackchannel {
+class IMPBackchannel
+{
 public:
-    static IMPBackchannel* createNew();
+    static IMPBackchannel *createNew();
     IMPBackchannel();
     ~IMPBackchannel();
 

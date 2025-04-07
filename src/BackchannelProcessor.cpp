@@ -1,54 +1,63 @@
 #include "BackchannelProcessor.hpp"
-#include "Logger.hpp"
-#include <imp/imp_audio.h>
-#include <cstring>
-#include <vector>
-#include <sys/wait.h>
+
+#include <cassert>
 #include <cerrno>
-#include <chrono>
+// #include <chrono> // Cline: Commented out potentially unused header
 #include <cmath>
 #include <cstdint>
-#include <cassert>
+#include <cstring>
 #include <fcntl.h>
+#include <imp/imp_audio.h>
+#include <sys/wait.h>
 #include <unistd.h>
+#include <vector>
+
+#include "Logger.hpp"
 #include "globals.hpp"
 
 #define MODULE "BackchannelProcessor"
 
 BackchannelProcessor::BackchannelProcessor()
-    : currentSessionId(0), fPipe(nullptr), fPipeFd(-1) // Reordered initializer list
+    : currentSessionId(0), fPipe(nullptr), fPipeFd(-1)
 {
 }
 
-BackchannelProcessor::~BackchannelProcessor() {
+BackchannelProcessor::~BackchannelProcessor()
+{
     closePipe();
 }
 
-static int getFrequency(IMPBackchannelFormat format) {
-    #define RETURN_FREQUENCY(EnumName, NameString, PayloadType, Frequency, MimeType) \
-        {   \
-            if (IMPBackchannelFormat::EnumName == format) \
-                return Frequency; \
-        }
+static int getFrequency(IMPBackchannelFormat format)
+{
+#define RETURN_FREQUENCY(EnumName, NameString, PayloadType, Frequency, MimeType)                   \
+    {                                                                                              \
+        if (IMPBackchannelFormat::EnumName == format)                                              \
+            return Frequency;                                                                      \
+    }
     X_FOREACH_BACKCHANNEL_FORMAT(RETURN_FREQUENCY)
-    #undef RETURN_FREQUENCY
+#undef RETURN_FREQUENCY
     abort();
 }
 
-std::vector<int16_t> BackchannelProcessor::resampleLinear(const std::vector<int16_t>& input_pcm, int input_rate, int output_rate) {
+std::vector<int16_t> BackchannelProcessor::resampleLinear(const std::vector<int16_t> &input_pcm,
+                                                          int input_rate, int output_rate)
+{
     assert(input_rate != output_rate);
 
     double ratio = static_cast<double>(output_rate) / input_rate;
-    size_t output_size = static_cast<size_t>(std::max(1.0, std::round(static_cast<double>(input_pcm.size()) * ratio)));
+    size_t output_size = static_cast<size_t>(
+        std::max(1.0, std::round(static_cast<double>(input_pcm.size()) * ratio)));
 
     std::vector<int16_t> output_pcm(output_size);
     size_t input_size = input_pcm.size();
 
-    for (size_t i = 0; i < output_size; ++i) {
+    for (size_t i = 0; i < output_size; ++i)
+    {
         double input_pos = static_cast<double>(i) / ratio;
         size_t index1 = static_cast<size_t>(input_pos);
 
-        if (index1 >= input_size) {
+        if (index1 >= input_size)
+        {
             index1 = input_size - 1;
         }
 
@@ -57,10 +66,13 @@ std::vector<int16_t> BackchannelProcessor::resampleLinear(const std::vector<int1
 
         double factor = input_pos - static_cast<double>(index1);
 
-        double interpolated_sample = static_cast<double>(sample1) * (1.0 - factor) + static_cast<double>(sample2) * factor;
+        double interpolated_sample =
+            static_cast<double>(sample1) * (1.0 - factor) + static_cast<double>(sample2) * factor;
 
-        if (interpolated_sample > INT16_MAX) interpolated_sample = INT16_MAX;
-        if (interpolated_sample < INT16_MIN) interpolated_sample = INT16_MIN;
+        if (interpolated_sample > INT16_MAX)
+            interpolated_sample = INT16_MAX;
+        if (interpolated_sample < INT16_MIN)
+            interpolated_sample = INT16_MIN;
 
         output_pcm[i] = static_cast<int16_t>(interpolated_sample);
     }
@@ -68,35 +80,40 @@ std::vector<int16_t> BackchannelProcessor::resampleLinear(const std::vector<int1
     return output_pcm;
 }
 
-
-bool BackchannelProcessor::initPipe() {
-    if (fPipe) {
+bool BackchannelProcessor::initPipe()
+{
+    if (fPipe)
+    {
         LOG_DEBUG("Pipe already initialized.");
         return true;
     }
     LOG_INFO("Opening pipe to: /bin/iac -s");
     fPipe = popen("/bin/iac -s", "w");
-    if (fPipe == nullptr) {
+    if (fPipe == nullptr)
+    {
         LOG_ERROR("popen failed: " << strerror(errno));
         fPipeFd = -1;
         return false;
     }
 
     fPipeFd = fileno(fPipe);
-    if (fPipeFd == -1) {
+    if (fPipeFd == -1)
+    {
         LOG_ERROR("fileno failed: " << strerror(errno));
         closePipe();
         return false;
     }
 
     int flags = fcntl(fPipeFd, F_GETFL, 0);
-    if (flags == -1) {
+    if (flags == -1)
+    {
         LOG_ERROR("fcntl(F_GETFL) failed: " << strerror(errno));
         closePipe();
         return false;
     }
 
-    if (fcntl(fPipeFd, F_SETFL, flags | O_NONBLOCK) == -1) {
+    if (fcntl(fPipeFd, F_SETFL, flags | O_NONBLOCK) == -1)
+    {
         LOG_ERROR("fcntl(F_SETFL, O_NONBLOCK) failed: " << strerror(errno));
         closePipe();
         return false;
@@ -106,53 +123,70 @@ bool BackchannelProcessor::initPipe() {
     return true;
 }
 
-void BackchannelProcessor::closePipe() {
-    if (fPipe) {
+void BackchannelProcessor::closePipe()
+{
+    if (fPipe)
+    {
         LOG_INFO("Closing pipe (fd=" << fPipeFd << ").");
         int ret = pclose(fPipe);
         fPipe = nullptr;
         fPipeFd = -1;
-        if (ret == -1) {
+        if (ret == -1)
+        {
             LOG_ERROR("pclose() failed: " << strerror(errno));
-        } else {
-             if (WIFEXITED(ret)) {
-                 LOG_INFO("Pipe process exited with status: " << WEXITSTATUS(ret));
-             } else if (WIFSIGNALED(ret)) {
-                 LOG_WARN("Pipe process terminated by signal: " << WTERMSIG(ret));
-             } else {
-                  LOG_WARN("Pipe process stopped for unknown reason.");
-             }
+        }
+        else
+        {
+            if (WIFEXITED(ret))
+            {
+                LOG_INFO("Pipe process exited with status: " << WEXITSTATUS(ret));
+            }
+            else if (WIFSIGNALED(ret))
+            {
+                LOG_WARN("Pipe process terminated by signal: " << WTERMSIG(ret));
+            }
+            else
+            {
+                LOG_WARN("Pipe process stopped for unknown reason.");
+            }
         }
     }
 }
 
-// Removed handleIdleState() implementation
-// Removed handleActiveState() implementation
 
-bool BackchannelProcessor::decodeFrame(const uint8_t* payload, size_t payloadSize, IMPBackchannelFormat format, std::vector<int16_t>& outPcmBuffer) {
+bool BackchannelProcessor::decodeFrame(const uint8_t *payload, size_t payloadSize,
+                                       IMPBackchannelFormat format,
+                                       std::vector<int16_t> &outPcmBuffer)
+{
     IMPAudioStream stream_in;
-    stream_in.stream = const_cast<uint8_t*>(payload);
+    stream_in.stream = const_cast<uint8_t *>(payload);
     stream_in.len = static_cast<int>(payloadSize);
 
     int adChn = (int)format;
     int ret = IMP_ADEC_SendStream(adChn, &stream_in, BLOCK);
-    if (ret != 0) {
+    if (ret != 0)
+    {
         LOG_ERROR("IMP_ADEC_SendStream failed for channel " << adChn << ": " << ret);
         return false;
     }
 
     IMPAudioStream stream_out;
     ret = IMP_ADEC_GetStream(adChn, &stream_out, BLOCK);
-    if (ret == 0 && stream_out.len > 0 && stream_out.stream != nullptr) {
+    if (ret == 0 && stream_out.len > 0 && stream_out.stream != nullptr)
+    {
         size_t num_samples = stream_out.len / sizeof(int16_t);
-        if (stream_out.len % sizeof(int16_t) != 0) {
-            LOG_WARN("Decoded stream length (" << stream_out.len << ") not multiple of int16_t size. Truncating.");
+        if (stream_out.len % sizeof(int16_t) != 0)
+        {
+            LOG_WARN("Decoded stream length (" << stream_out.len
+                                               << ") not multiple of int16_t size. Truncating.");
         }
-        outPcmBuffer.assign(reinterpret_cast<int16_t*>(stream_out.stream),
-                            reinterpret_cast<int16_t*>(stream_out.stream) + num_samples);
+        outPcmBuffer.assign(reinterpret_cast<int16_t *>(stream_out.stream),
+                            reinterpret_cast<int16_t *>(stream_out.stream) + num_samples);
         IMP_ADEC_ReleaseStream(adChn, &stream_out);
         return true;
-    } else if (ret != 0) {
+    }
+    else if (ret != 0)
+    {
         LOG_ERROR("IMP_ADEC_GetStream failed for channel " << adChn << ": " << ret);
         return false;
     }
@@ -162,38 +196,53 @@ bool BackchannelProcessor::decodeFrame(const uint8_t* payload, size_t payloadSiz
     return true;
 }
 
-bool BackchannelProcessor::writePcmToPipe(const std::vector<int16_t>& pcmBuffer) {
-    if (fPipeFd == -1 || fPipe == nullptr) {
+bool BackchannelProcessor::writePcmToPipe(const std::vector<int16_t> &pcmBuffer)
+{
+    if (fPipeFd == -1 || fPipe == nullptr)
+    {
         LOG_ERROR("Pipe is closed (fd=" << fPipeFd << "), cannot write PCM data.");
         return false;
     }
-    if (pcmBuffer.empty()) {
+    if (pcmBuffer.empty())
+    {
         LOG_DEBUG("Attempted to write empty PCM buffer to pipe.");
         return true;
     }
 
     size_t bytesToWrite = pcmBuffer.size() * sizeof(int16_t);
-    const uint8_t* dataPtr = reinterpret_cast<const uint8_t*>(pcmBuffer.data());
+    const uint8_t *dataPtr = reinterpret_cast<const uint8_t *>(pcmBuffer.data());
 
     ssize_t bytesWritten = write(fPipeFd, dataPtr, bytesToWrite);
 
-    if (bytesWritten == static_cast<ssize_t>(bytesToWrite)) {
-        // Success
-    } else if (bytesWritten >= 0) {
-        LOG_WARN("Partial write to pipe (" << bytesWritten << "/" << bytesToWrite << "). Assuming pipe clogged.");
+    if (bytesWritten == static_cast<ssize_t>(bytesToWrite))
+    {
+        // Successfully wrote all bytes
+    }
+    else if (bytesWritten >= 0)
+    {
+        LOG_WARN("Partial write to pipe (" << bytesWritten << "/" << bytesToWrite
+                                           << "). Assuming pipe clogged.");
         return true;
     }
-    else {
+    else
+    {
         int saved_errno = errno;
-        if (saved_errno == EAGAIN || saved_errno == EWOULDBLOCK) {
+        if (saved_errno == EAGAIN || saved_errno == EWOULDBLOCK)
+        {
             LOG_WARN("Pipe clogged (EAGAIN/EWOULDBLOCK). Discarding PCM chunk.");
             return true;
-        } else if (saved_errno == EPIPE) {
-            LOG_ERROR("write() failed: Broken pipe (EPIPE). Assuming pipe closed by reader.");
+        }
+        else if (saved_errno == EPIPE)
+        {
+            LOG_ERROR("write() failed: Broken pipe (EPIPE). Assuming pipe closed by "
+                      "reader.");
             closePipe();
             return false;
-        } else {
-            LOG_ERROR("write() failed: errno=" << saved_errno << ": " << strerror(saved_errno) << ". Assuming pipe closed.");
+        }
+        else
+        {
+            LOG_ERROR("write() failed: errno=" << saved_errno << ": " << strerror(saved_errno)
+                                               << ". Assuming pipe closed.");
             closePipe();
             return false;
         }
@@ -202,15 +251,17 @@ bool BackchannelProcessor::writePcmToPipe(const std::vector<int16_t>& pcmBuffer)
     return true;
 }
 
-
-bool BackchannelProcessor::processFrame(const BackchannelFrame& frame) {
+bool BackchannelProcessor::processFrame(const BackchannelFrame &frame)
+{
     std::vector<int16_t> decoded_pcm;
-    if (!decodeFrame(frame.payload.data(), frame.payload.size(), frame.format, decoded_pcm)) {
+    if (!decodeFrame(frame.payload.data(), frame.payload.size(), frame.format, decoded_pcm))
+    {
         // Error already logged in decodeFrame
         return true; // Continue processing loop, maybe next frame works
     }
 
-    if (decoded_pcm.empty()) {
+    if (decoded_pcm.empty())
+    {
         LOG_DEBUG("decodeFrame returned empty PCM buffer.");
         return true; // Nothing to process
     }
@@ -222,24 +273,32 @@ bool BackchannelProcessor::processFrame(const BackchannelFrame& frame) {
     // Resample ONLY if necessary (i.e., for non-Opus formats if rates differ)
     int input_rate = getFrequency(frame.format);
     int target_rate = cfg->audio.output_sample_rate;
-    const std::vector<int16_t>* buffer_to_write = &decoded_pcm; // Default to using the decoded buffer
+    const std::vector<int16_t> *buffer_to_write =
+        &decoded_pcm;                   // Default to using the decoded buffer
     std::vector<int16_t> resampled_pcm; // Only used if resampling occurs
 
-    if (frame.format != IMPBackchannelFormat::OPUS && input_rate != target_rate) {
+    if (frame.format != IMPBackchannelFormat::OPUS && input_rate != target_rate)
+    {
         // Resample the original decoded (mono) buffer for non-Opus formats
         resampled_pcm = BackchannelProcessor::resampleLinear(decoded_pcm, input_rate, target_rate);
         buffer_to_write = &resampled_pcm; // Point to the resampled buffer
         LOG_DEBUG("Resampled mono frame from " << input_rate << "Hz to " << target_rate << "Hz.");
-    } else {
+    }
+    else
+    {
         // For Opus, or if rates match, use the decoded buffer directly.
         // No resampling needed. Opus decoder already outputs at target_rate.
-        LOG_DEBUG("Using decoded mono frame directly (Format: " << (int)frame.format << ", Rate: " << input_rate << "Hz).");
+        LOG_DEBUG("Using decoded mono frame directly (Format: " << (int)frame.format << ", Rate: "
+                                                                << input_rate << "Hz).");
     }
 
     // Write the final mono PCM (resampled if needed) to the pipe
-    if (buffer_to_write != nullptr && !buffer_to_write->empty()) {
-        LOG_DEBUG("Writing " << buffer_to_write->size() << " mono samples (" << buffer_to_write->size() * sizeof(int16_t) << " bytes) to pipe...");
-        if (!writePcmToPipe(*buffer_to_write)) {
+    if (buffer_to_write != nullptr && !buffer_to_write->empty())
+    {
+        LOG_DEBUG("Writing " << buffer_to_write->size() << " mono samples ("
+                             << buffer_to_write->size() * sizeof(int16_t) << " bytes) to pipe...");
+        if (!writePcmToPipe(*buffer_to_write))
+        {
             // Error writing to pipe, likely closed. Stop processing loop.
             return false;
         }
@@ -248,9 +307,10 @@ bool BackchannelProcessor::processFrame(const BackchannelFrame& frame) {
     return true;
 }
 
-
-void BackchannelProcessor::run() {
-    if (!global_backchannel) {
+void BackchannelProcessor::run()
+{
+    if (!global_backchannel)
+    {
         LOG_ERROR("Cannot run BackchannelProcessor: global_backchannel is null.");
         return;
     }
@@ -258,65 +318,91 @@ void BackchannelProcessor::run() {
     LOG_INFO("Processor thread running...");
 
     global_backchannel->running = true;
-    while (global_backchannel->running) {
+    while (global_backchannel->running)
+    {
         // Read frame directly from the queue
         BackchannelFrame frame = global_backchannel->inputQueue->wait_read();
 
         // Check if we should stop
-        if (!global_backchannel->running) {
+        if (!global_backchannel->running)
+        {
             break;
         }
 
         // Handle Zero-Payload Frame (Stop Signal)
-        if (frame.payload.empty()) {
+        if (frame.payload.empty())
+        {
             LOG_INFO("Received stop signal (zero-payload) from session " << frame.clientSessionId);
-            if (frame.clientSessionId == currentSessionId && currentSessionId != 0) {
+            if (frame.clientSessionId == currentSessionId && currentSessionId != 0)
+            {
                 LOG_INFO("Current session " << currentSessionId << " stopped. Closing pipe.");
                 closePipe();
                 currentSessionId = 0; // Reset current session
-            } else if (currentSessionId == 0) {
-                 LOG_INFO("Stop signal received but no current session. Ignoring.");
-            } else {
-                LOG_INFO("Stop signal from non-current session " << frame.clientSessionId << " (Current: " << currentSessionId << "). Ignoring.");
+            }
+            else if (currentSessionId == 0)
+            {
+                LOG_INFO("Stop signal received but no current session. Ignoring.");
+            }
+            else
+            {
+                LOG_INFO("Stop signal from non-current session "
+                         << frame.clientSessionId << " (Current: " << currentSessionId
+                         << "). Ignoring.");
             }
             continue; // Skip processing this empty frame
         }
 
         // --- Data Frame Handling ---
-        if (currentSessionId == 0) {
+        if (currentSessionId == 0)
+        {
             // No current session, this frame's sender becomes the current one
             currentSessionId = frame.clientSessionId;
             LOG_INFO("New current session: " << currentSessionId << ". Opening pipe.");
-            if (!initPipe()) {
-                LOG_ERROR("Failed to open pipe for new session " << currentSessionId << ". Resetting.");
+            if (!initPipe())
+            {
+                LOG_ERROR("Failed to open pipe for new session " << currentSessionId
+                                                                 << ". Resetting.");
                 currentSessionId = 0; // Reset if pipe fails
-                continue; // Skip processing this frame
+                continue;             // Skip processing this frame
             }
             // Pipe is open, proceed to process
-            if (!processFrame(frame)) {
+            if (!processFrame(frame))
+            {
                 // processFrame returns false if pipe write fails and closes pipe
-                LOG_WARN("processFrame failed for initial frame of session " << currentSessionId << ". Pipe closed.");
+                LOG_WARN("processFrame failed for initial frame of session " << currentSessionId
+                                                                             << ". Pipe closed.");
                 currentSessionId = 0; // Reset as pipe is closed
             }
-        } else if (frame.clientSessionId == currentSessionId) {
+        }
+        else if (frame.clientSessionId == currentSessionId)
+        {
             // Frame is from the current session
-            if (!fPipe) { // Ensure pipe is open (it might have closed unexpectedly)
-                 LOG_WARN("Pipe was closed unexpectedly for current session " << currentSessionId << ". Reopening.");
-                 if (!initPipe()) {
-                     LOG_ERROR("Failed to reopen pipe for session " << currentSessionId << ". Resetting.");
-                     currentSessionId = 0;
-                     continue; // Skip processing this frame
-                 }
+            if (!fPipe)
+            { // Ensure pipe is open (it might have closed unexpectedly)
+                LOG_WARN("Pipe was closed unexpectedly for current session " << currentSessionId
+                                                                             << ". Reopening.");
+                if (!initPipe())
+                {
+                    LOG_ERROR("Failed to reopen pipe for session " << currentSessionId
+                                                                   << ". Resetting.");
+                    currentSessionId = 0;
+                    continue; // Skip processing this frame
+                }
             }
             // Pipe should be open, process the frame
-            if (!processFrame(frame)) {
+            if (!processFrame(frame))
+            {
                 // processFrame returns false if pipe write fails and closes pipe
-                 LOG_WARN("processFrame failed for session " << currentSessionId << ". Pipe closed.");
-                 currentSessionId = 0; // Reset as pipe is closed
+                LOG_WARN("processFrame failed for session " << currentSessionId
+                                                            << ". Pipe closed.");
+                currentSessionId = 0; // Reset as pipe is closed
             }
-        } else {
+        }
+        else
+        {
             // Frame is from a different session, ignore it
-            LOG_DEBUG("Discarding frame from non-current session " << frame.clientSessionId << " (Current: " << currentSessionId << ")");
+            LOG_DEBUG("Discarding frame from non-current session "
+                      << frame.clientSessionId << " (Current: " << currentSessionId << ")");
         }
     } // end while(running)
 

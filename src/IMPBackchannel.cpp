@@ -1,29 +1,28 @@
 #include "IMPBackchannel.hpp"
-
-#include <liveMedia.hh>
-#include <imp/imp_audio.h> 
-#include <opus/opus.h>
-#include <stdlib.h>
-#include <stdio.h>
-// #include <mutex> // Mutex removed
-#include "Logger.hpp"
 #include "Config.hpp"
+#include "Logger.hpp"
+#include <imp/imp_audio.h>
+// #include <liveMedia.hh> // Cline: Commented out potentially unused header
+#include <opus/opus.h>
+// #include <stdio.h>      // Cline: Commented out potentially unused header
+// #include <stdlib.h>     // Cline: Commented out potentially unused header
 
 #define MODULE "IMPBackchannel"
 
 // Thread-local storage for the Opus decoder instance.
 // Assumes the SDK calls open/decode/close for a given channel from the same thread.
-thread_local OpusDecoder* tl_opusDecoder = nullptr;
-// static std::mutex s_opusMutex; // Mutex removed
+thread_local OpusDecoder *tl_opusDecoder = nullptr;
 
 // Decoder Callbacks matching IMPAudioDecDecoder signature
-static int opus_openDecoder(void *pvoidDecoderAttr, void *pDecoder) {
+static int opus_openDecoder(void *pvoidDecoderAttr, void *pDecoder)
+{
     // pDecoder is ignored because the SDK doesn't reliably pass the correct value.
     // We manage the instance using thread_local storage.
-    // std::lock_guard<std::mutex> lock(s_opusMutex); // Lock removed
 
-    if (tl_opusDecoder != nullptr) {
-        LOG_WARN("Opus decoder already initialized for this thread. Ignoring subsequent open call.");
+    if (tl_opusDecoder != nullptr)
+    {
+        LOG_WARN(
+            "Opus decoder already initialized for this thread. Ignoring subsequent open call.");
         // Even if already initialized, we don't try to write to pDecoder as it caused crashes.
         return 0; // Indicate success
     }
@@ -32,30 +31,34 @@ static int opus_openDecoder(void *pvoidDecoderAttr, void *pDecoder) {
     const int channels = 2; // Create a STEREO decoder as input is stereo
     int error;
     tl_opusDecoder = opus_decoder_create(sample_rate, channels, &error);
-    if (error != OPUS_OK || !tl_opusDecoder) {
-        LOG_ERROR("Failed to create Opus stereo decoder for this thread: " << opus_strerror(error)); // Update log
+    if (error != OPUS_OK || !tl_opusDecoder)
+    {
+        LOG_ERROR("Failed to create Opus stereo decoder for this thread: "
+                  << opus_strerror(error)); // Update log
         tl_opusDecoder = nullptr;
         return -1; // Indicate failure
     }
-    LOG_DEBUG("Thread-local Opus STEREO decoder opened successfully (will downmix to mono)"); // Update log
+    LOG_DEBUG(
+        "Thread-local Opus STEREO decoder opened successfully (will downmix to mono)"); // Update
+                                                                                        // log
     return 0; // Indicate success
 }
 
 static int opus_decodeFrm(void *pDecoder, unsigned char *pu8Inbuf, int s32InLen,
-                          unsigned short *pu16Outbuf, int* ps32OutLen, int *ps32Chns) {
-    // Ignore pDecoder, use static instance with mutex protection for access
-
-    // std::lock_guard<std::mutex> lock(s_opusMutex); // Lock removed
+                          unsigned short *pu16Outbuf, int *ps32OutLen, int *ps32Chns)
+{
+    // Ignore pDecoder, use thread-local instance.
 
     // CRITICAL CHECK: If decoder isn't initialized for this thread yet, return error.
-    if (!tl_opusDecoder) { // Check the thread-local instance
-         LOG_ERROR("Opus decoder instance is not initialized for this thread in decodeFrm");
-         *ps32OutLen = 0; // Ensure output length is 0 on error
-         return -1; // Indicate failure
-     }
+    if (!tl_opusDecoder)
+    { // Check the thread-local instance
+        LOG_ERROR("Opus decoder instance is not initialized for this thread in decodeFrm");
+        *ps32OutLen = 0; // Ensure output length is 0 on error
+        return -1;       // Indicate failure
+    }
 
     const int max_frame_size_per_channel = cfg->audio.output_sample_rate * 120 / 1000;
-    const int input_channels = 2; // Decoder expects stereo input
+    const int input_channels = 2;  // Decoder expects stereo input
     const int output_channels = 1; // We will output mono
 
     // Allocate a temporary buffer for stereo decoding
@@ -63,20 +66,26 @@ static int opus_decodeFrm(void *pDecoder, unsigned char *pu8Inbuf, int s32InLen,
     opus_int16 temp_stereo_buffer[max_frame_size_per_channel * input_channels];
 
     // Log the input size before decoding
-    LOG_DEBUG("opus_decodeFrm: Attempting to decode Opus frame with input size (s32InLen): " << s32InLen);
+    LOG_DEBUG(
+        "opus_decodeFrm: Attempting to decode Opus frame with input size (s32InLen): " << s32InLen);
 
     // Decode the stereo Opus data into the temporary buffer
-    int frame_size_samples_per_channel = opus_decode(tl_opusDecoder, pu8Inbuf, s32InLen, temp_stereo_buffer, max_frame_size_per_channel, 0);
+    int frame_size_samples_per_channel = opus_decode(
+        tl_opusDecoder, pu8Inbuf, s32InLen, temp_stereo_buffer, max_frame_size_per_channel, 0);
 
-    if (frame_size_samples_per_channel < 0) {
-        LOG_ERROR("Thread-local Opus (stereo) decode failed for input size " << s32InLen << ": " << opus_strerror(frame_size_samples_per_channel)); // Update log with input size
+    if (frame_size_samples_per_channel < 0)
+    {
+        LOG_ERROR("Thread-local Opus (stereo) decode failed for input size "
+                  << s32InLen << ": "
+                  << opus_strerror(frame_size_samples_per_channel)); // Update log with input size
         *ps32OutLen = 0;
         return -1; // Indicate failure
     }
 
     // Downmix stereo to mono into the final output buffer (pu16Outbuf)
-    opus_int16* out_ptr = (opus_int16*)pu16Outbuf;
-    for (int i = 0; i < frame_size_samples_per_channel; ++i) {
+    opus_int16 *out_ptr = (opus_int16 *)pu16Outbuf;
+    for (int i = 0; i < frame_size_samples_per_channel; ++i)
+    {
         // Average Left and Right channels: (L + R) / 2
         // Use wider type for intermediate sum to prevent overflow
         int32_t left = temp_stereo_buffer[i * input_channels];
@@ -90,18 +99,19 @@ static int opus_decodeFrm(void *pDecoder, unsigned char *pu8Inbuf, int s32InLen,
     return 0; // Indicate success
 }
 
-static int opus_closeDecoder(void *pDecoder) {
+static int opus_closeDecoder(void *pDecoder)
+{
     // Ignore pDecoder, use thread-local instance
-    // std::lock_guard<std::mutex> lock(s_opusMutex); // Lock removed
 
-    if (!tl_opusDecoder) {
+    if (!tl_opusDecoder)
+    {
         LOG_WARN("opus_closeDecoder called but thread-local decoder instance is already NULL.");
         return 0; // Indicate success
     }
 
     // Destroy the thread-local instance
     opus_decoder_destroy(tl_opusDecoder);
-    tl_opusDecoder = nullptr; 
+    tl_opusDecoder = nullptr;
     LOG_DEBUG("Thread-local Opus decoder closed successfully");
     return 0; // Indicate success
 }
@@ -111,30 +121,35 @@ static int opusDecoderHandle = -1;
 
 // --- IMPBackchannel Class Implementation ---
 
-IMPBackchannel* IMPBackchannel::createNew() {
+IMPBackchannel *IMPBackchannel::createNew()
+{
     return new IMPBackchannel();
 }
 
-IMPBackchannel::IMPBackchannel() {
+IMPBackchannel::IMPBackchannel()
+{
     // No need to manage static/thread-local decoder here, init handles registration
     // which should trigger the thread-local openDecoder on the correct thread later.
     init();
 }
 
-IMPBackchannel::~IMPBackchannel() {
+IMPBackchannel::~IMPBackchannel()
+{
     deinit();
 }
 
-int IMPBackchannel::init() {
+int IMPBackchannel::init()
+{
     LOG_DEBUG("IMPBackchannel::init()");
     int ret = 0;
 
     // Register Opus decoder only if not already registered
     // This registration itself should be safe even if called multiple times,
     // but the handle management relies on it being called effectively once.
-    if (opusDecoderHandle == -1) {
+    if (opusDecoderHandle == -1)
+    {
         IMPAudioDecDecoder opusDecoder; // Use the correct struct name from imp_audio.h
-        opusDecoder.type = PT_MAX; // Placeholder type for registration
+        opusDecoder.type = PT_MAX;      // Placeholder type for registration
         snprintf(opusDecoder.name, sizeof(opusDecoder.name), "OPUS"); // Name for the decoder
         opusDecoder.openDecoder = opus_openDecoder;
         opusDecoder.decodeFrm = opus_decodeFrm;
@@ -142,15 +157,21 @@ int IMPBackchannel::init() {
         opusDecoder.closeDecoder = opus_closeDecoder;
 
         ret = IMP_ADEC_RegisterDecoder(&opusDecoderHandle, &opusDecoder);
-        if (ret != 0) { 
+        if (ret != 0)
+        {
             LOG_ERROR("Failed to register Opus decoder: " << ret);
             opusDecoderHandle = -1; // Ensure handle remains invalid on failure
-            // No need to clean up s_opusDecoder here, as openDecoder shouldn't have been called yet.
-        } else {
+            // No need to clean up s_opusDecoder here, as openDecoder shouldn't have been called
+            // yet.
+        }
+        else
+        {
             LOG_DEBUG("Registered Opus decoder with handle: " << opusDecoderHandle);
         }
-    } else {
-         LOG_DEBUG("Opus decoder already registered with handle: " << opusDecoderHandle);
+    }
+    else
+    {
+        LOG_DEBUG("Opus decoder already registered with handle: " << opusDecoderHandle);
     }
 
     // --- Create Decoder Channels ---
@@ -173,63 +194,77 @@ int IMPBackchannel::init() {
 
     // Create Opus channel if registration was successful
     // This call should trigger opus_openDecoder via the SDK
-    if (opusDecoderHandle != -1) {
-        adec_attr.type = (IMPAudioPalyloadType)opusDecoderHandle; 
+    if (opusDecoderHandle != -1)
+    {
+        adec_attr.type = (IMPAudioPalyloadType)opusDecoderHandle;
         adChn = (int)IMPBackchannelFormat::OPUS;
         ret = IMP_ADEC_CreateChn(adChn, &adec_attr);
         LOG_DEBUG_OR_ERROR(ret, "IMP_ADEC_CreateChn(OPUS, " << adChn << ")");
-        if (ret != 0) { 
-            LOG_ERROR("Failed to create Opus decoder channel: " << ret << ". Unregistering decoder.");
+        if (ret != 0)
+        {
+            LOG_ERROR("Failed to create Opus decoder channel: " << ret
+                                                                << ". Unregistering decoder.");
             // If channel creation fails, unregister the decoder
             IMP_ADEC_UnRegisterDecoder(&opusDecoderHandle); // This should call opus_closeDecoder
             opusDecoderHandle = -1;
-             // Ensure thread-local decoder is cleaned up if closeDecoder wasn't called by SDK
-             // This assumes IMP_ADEC_UnRegisterDecoder calls closeDecoder on the same thread
-             // where the channel was created/used. If not, this cleanup might not occur correctly.
-             if (tl_opusDecoder != nullptr) {
-                 LOG_WARN("Cleaning up thread-local Opus decoder due to channel creation failure.");
-                 opus_decoder_destroy(tl_opusDecoder);
-                 tl_opusDecoder = nullptr;
-             }
-        } else {
-             LOG_DEBUG("Successfully created Opus decoder channel " << adChn);
+            // Ensure thread-local decoder is cleaned up if closeDecoder wasn't called by SDK
+            // This assumes IMP_ADEC_UnRegisterDecoder calls closeDecoder on the same thread
+            // where the channel was created/used. If not, this cleanup might not occur correctly.
+            if (tl_opusDecoder != nullptr)
+            {
+                LOG_WARN("Cleaning up thread-local Opus decoder due to channel creation failure.");
+                opus_decoder_destroy(tl_opusDecoder);
+                tl_opusDecoder = nullptr;
+            }
+        }
+        else
+        {
+            LOG_DEBUG("Successfully created Opus decoder channel " << adChn);
         }
     }
 
     return 0; // Assuming success for now, should check 'ret' values properly
 }
 
-void IMPBackchannel::deinit() {
+void IMPBackchannel::deinit()
+{
     LOG_DEBUG("IMPBackchannel::deinit()");
     int ret;
 
-    // Destroy channels using the macro
-    #define DESTROY_ADEC(EnumName, NameString, PayloadType, Frequency, MimeType) \
-        { \
-            int adChn = (int)IMPBackchannelFormat::EnumName; \
-            /* Skip destroying Opus if handle is invalid (init/channel creation failed) */ \
-            if (IMPBackchannelFormat::EnumName == IMPBackchannelFormat::OPUS && opusDecoderHandle == -1) { \
-                 LOG_DEBUG("Skipping destroy for Opus channel " << adChn << " due to invalid handle."); \
-            } else { \
-                ret = IMP_ADEC_DestroyChn(adChn); \
-                LOG_DEBUG_OR_ERROR(ret, "IMP_ADEC_DestroyChn(" #EnumName ", " << adChn << ")"); \
-            } \
-        }
+// Destroy channels using the macro
+#define DESTROY_ADEC(EnumName, NameString, PayloadType, Frequency, MimeType)                       \
+    {                                                                                              \
+        int adChn = (int)IMPBackchannelFormat::EnumName;                                           \
+        /* Skip destroying Opus if handle is invalid (init/channel creation failed) */             \
+        if (IMPBackchannelFormat::EnumName == IMPBackchannelFormat::OPUS &&                        \
+            opusDecoderHandle == -1)                                                               \
+        {                                                                                          \
+            LOG_DEBUG("Skipping destroy for Opus channel " << adChn << " due to invalid handle."); \
+        }                                                                                          \
+        else                                                                                       \
+        {                                                                                          \
+            ret = IMP_ADEC_DestroyChn(adChn);                                                      \
+            LOG_DEBUG_OR_ERROR(ret, "IMP_ADEC_DestroyChn(" #EnumName ", " << adChn << ")");        \
+        }                                                                                          \
+    }
     X_FOREACH_BACKCHANNEL_FORMAT(DESTROY_ADEC)
-    #undef DESTROY_ADEC
+#undef DESTROY_ADEC
 
     // Unregister Opus decoder if it was registered
     // This should trigger opus_closeDecoder via the SDK if the handle is valid
-    if (opusDecoderHandle != -1) {
+    if (opusDecoderHandle != -1)
+    {
         ret = IMP_ADEC_UnRegisterDecoder(&opusDecoderHandle);
         LOG_DEBUG_OR_ERROR(ret, "IMP_ADEC_UnRegisterDecoder(OPUS, " << opusDecoderHandle << ")");
         opusDecoderHandle = -1; // Reset handle
         // Double-check thread-local decoder cleanup, in case closeDecoder wasn't called by SDK
         // Assumes UnRegisterDecoder calls closeDecoder on the correct thread.
-        if (tl_opusDecoder != nullptr) {
-             LOG_WARN("Thread-local Opus decoder instance may not have been cleaned up by UnRegisterDecoder. Forcing cleanup.");
-             opus_decoder_destroy(tl_opusDecoder);
-             tl_opusDecoder = nullptr;
+        if (tl_opusDecoder != nullptr)
+        {
+            LOG_WARN("Thread-local Opus decoder instance may not have been cleaned up by "
+                     "UnRegisterDecoder. Forcing cleanup.");
+            opus_decoder_destroy(tl_opusDecoder);
+            tl_opusDecoder = nullptr;
         }
     }
 }
