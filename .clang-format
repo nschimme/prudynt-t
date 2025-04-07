@@ -1,0 +1,20 @@
+BasedOnStyle: LLVM
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+BreakBeforeBraces: Allman
+AllowShortFunctionsOnASingleLine: Empty
+IncludeBlocks: Regroup
+IncludeCategories:
+  - Regex:           '^<.*>'
+    Priority:        1
+    SortPriority:    0
+    CaseSensitive:   false
+  - Regex:           '^".*"'
+    Priority:        2
+    SortPriority:    0
+    CaseSensitive:   false
+SortIncludes: true
+SpaceBeforeParens: ControlStatements
+AccessModifierOffset: -4
+ColumnLimit: 100
