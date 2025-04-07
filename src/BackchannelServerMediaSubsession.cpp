@@ -21,12 +21,6 @@
 
 #define MODULE "BackchannelSubsession"
 
-static void delayedDeleteTask(void* clientData) {
-    BackchannelStreamState* state = (BackchannelStreamState*)clientData;
-    LOG_DEBUG("Deleting BackchannelStreamState");
-    delete state;
- }
-
  BackchannelServerMediaSubsession* BackchannelServerMediaSubsession::createNew(UsageEnvironment& env, IMPBackchannelFormat format /*, Boolean reuseFirstSource - Removed */) {
      return new BackchannelServerMediaSubsession(env, format);
  }
@@ -330,51 +324,6 @@ void BackchannelServerMediaSubsession::startStream(unsigned clientSessionId, voi
          rtpTimestamp = 0;
          LOG_WARN("RTPSource is NULL in state for session " << clientSessionId << ". Setting SeqNum/Timestamp to 0.");
     }
- }
-
-
-void BackchannelServerMediaSubsession::deleteStreamState(void*& streamToken) {
-    char timeBuf[128];
-    struct timeval now;
-    gettimeofday(&now, NULL);
-    strftime(timeBuf, sizeof(timeBuf), "%Y-%m-%d %H:%M:%S", localtime(&now.tv_sec));
-    LOG_DEBUG("deleteStreamState called at " << timeBuf << "." << (int)(now.tv_usec / 1000) << " with token: " << (int)streamToken);
-
-    if (streamToken == nullptr) {
-        LOG_DEBUG("streamToken is already NULL. Returning.");
-        return;
-    }
-
-     BackchannelStreamState* state = (BackchannelStreamState*)streamToken;
-     LOG_DEBUG("deleteStreamState: State pointer from token: " << (int)state);
-     if (state != nullptr) {
-         LOG_DEBUG("Proceeding with deletion for session " << state->clientSessionId);
-         unsigned sid = state->clientSessionId;
-
-         LOG_DEBUG("deleteStreamState: Looking up destinations for clientSessionId: " << sid);
-         BackchannelDestinations* dests = (BackchannelDestinations*)(fDestinationsHashTable->Lookup((char const*)sid));
-         LOG_DEBUG("deleteStreamState: Found destinations pointer: " << (int)dests << ". Removing from table if found.");
-         if (dests) {
-             LOG_DEBUG("Removing Destinations for session " << sid << " from hash table.");
-             fDestinationsHashTable->Remove((char const*)sid);
-             LOG_DEBUG("Deleting Destinations object for session " << sid);
-             delete dests;
-         } else {
-             LOG_DEBUG("No Destinations found in hash table for session " << sid << " to remove.");
-         }
-
-         LOG_DEBUG("Scheduling delayed deletion of StreamState object for session " << sid << " at address " << (int)state);
-         envir().taskScheduler().scheduleDelayedTask(0, (TaskFunc*)delayedDeleteTask, state);
-         state = nullptr;
-
-     } else {
-         LOG_DEBUG("deleteStreamState called with state pointer already NULL (token: " << (int)streamToken << ")");
-     }
-
-     if (state == nullptr) {
-          LOG_DEBUG("Clearing caller's streamToken pointer.");
-          streamToken = nullptr;
-     }
  }
 
 void BackchannelServerMediaSubsession::closeStreamSource(FramedSource *inputSource) {

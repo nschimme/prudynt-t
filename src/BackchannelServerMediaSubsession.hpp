@@ -63,8 +63,6 @@ public:
     virtual RTPSource* createNewRTPSource(Groupsock* rtpGroupsock, unsigned char rtpPayloadTypeIfDynamic, MediaSink* outputSink);
     virtual char const* getAuxSDPLine(RTPSink* rtpSink, FramedSource* inputSource);
 
-    virtual void deleteStreamState(void*& streamToken);
-
 private:
     char* fSDPLines = nullptr;
      HashTable* fDestinationsHashTable;
