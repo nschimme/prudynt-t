@@ -44,9 +44,7 @@ struct BackchannelFrame
 	std::vector<uint8_t> payload; // Raw audio payload (e.g., PCMU, PCMA)
 	IMPBackchannelFormat format;  // Use the enum type for format
     unsigned int clientSessionId; // Added to identify the source sink
-	struct timeval timestamp;     // Presentation timestamp from RTP header
 };
-
 
 struct jpeg_stream
 {
