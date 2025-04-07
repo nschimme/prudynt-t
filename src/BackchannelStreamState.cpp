@@ -8,11 +8,10 @@
 BackchannelStreamState::BackchannelStreamState(UsageEnvironment &env,
                                                char const *cname,
                                                RTPSource *_rtpSource,
-                                               BackchannelSink *_mediaSink,
+                                               MediaSink *_mediaSink,
                                                Groupsock *_rtpGS,
                                                Groupsock *_rtcpGS,
                                                unsigned _clientSessionId,
-                                               Boolean _isTCP,
                                                struct sockaddr_storage const &_destAddr,
                                                Port const &_rtpDestPort,
                                                Port const &_rtcpDestPort,
@@ -28,10 +27,10 @@ BackchannelStreamState::BackchannelStreamState(UsageEnvironment &env,
     , rtcpGS(_rtcpGS)
     , rtcpInstance(nullptr)
     , clientSessionId(_clientSessionId)
-    , fIsTCP(_isTCP)
 {
     // Initialize the appropriate part of the transport union
-    if (fIsTCP)
+    fTransport.isTCP = (_tcpSocketNum >= 0);
+    if (fTransport.isTCP)
     {
         fTransport.t.tcpSocketNum = _tcpSocketNum;
         fTransport.t.rtpChannelId = _rtpChannelId;
@@ -87,7 +86,7 @@ void BackchannelStreamState::startPlaying(
             rtcpInstance->setRRHandler(rtcpRRHandler, rtcpRRHandlerClientData);
 
             // Configure transport based on stored flag and union data
-            if (fIsTCP)
+            if (fTransport.isTCP)
             {
                 LOG_INFO("Configuring stream for TCP (session "
                          << clientSessionId << ", socket " << fTransport.t.tcpSocketNum

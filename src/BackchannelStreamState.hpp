@@ -4,7 +4,6 @@
 // Manages the state of a backchannel audio stream, associating RTP source,
 // sink, groupsocks, and transport details.
 
-#include "BackchannelSink.hpp"
 #include "Logger.hpp"
 
 #include <liveMedia.hh>
@@ -24,10 +23,10 @@ struct TcpTransportDetails
     TLSState *tlsState;
 };
 
-// Union to hold either UDP or TCP specific details
 union TransportSpecificDetails {
     UdpTransportDetails u;
     TcpTransportDetails t;
+    bool isTCP;
 
     TransportSpecificDetails() {}
     ~TransportSpecificDetails() {}
@@ -43,11 +42,10 @@ public:
     BackchannelStreamState(UsageEnvironment &env,
                            char const *cname,
                            RTPSource *_rtpSource,
-                           BackchannelSink *_mediaSink,
+                           MediaSink *_mediaSink,
                            Groupsock *_rtpGS,
                            Groupsock *_rtcpGS,
                            unsigned _clientSessionId,
-                           Boolean _isTCP,
                            struct sockaddr_storage const &_destAddr,
                            Port const &_rtpDestPort,
                            Port const &_rtcpDestPort,
@@ -68,13 +66,12 @@ private:
     UsageEnvironment &fEnv;
     char const *fCNAME; // CNAME for RTCP reports
     RTPSource *rtpSource;
-    BackchannelSink *mediaSink;
+    MediaSink *mediaSink;
     Groupsock *rtpGS;
     Groupsock *rtcpGS;          // Groupsock for RTCP
     RTCPInstance *rtcpInstance; // RTCP instance associated with the stream
     unsigned clientSessionId;   // ID of the client for this stream
 
-    Boolean fIsTCP;                      // Flag indicating TCP or UDP transport
     TransportSpecificDetails fTransport; // Union holding transport-specific details
 };
 

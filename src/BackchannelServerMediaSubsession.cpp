@@ -269,7 +269,6 @@ void BackchannelServerMediaSubsession::getStreamParameters(
                                      rtpGroupsock,
                                      rtcpGroupsock,
                                      clientSessionId,
-                                     isTCP,
                                      destinationAddress,
                                      clientRTPPort,
                                      clientRTCPPort,

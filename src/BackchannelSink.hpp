@@ -7,7 +7,6 @@
 #include "IMPBackchannel.hpp"
 #include "Logger.hpp"
 
-#include <BasicUsageEnvironment.hh>
 #include <cstdint>
 #include <liveMedia.hh>
 
