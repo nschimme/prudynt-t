@@ -386,10 +386,5 @@ void BackchannelServerMediaSubsession::closeStreamSink(MediaSink *outputSink) {
 
 void BackchannelServerMediaSubsession::getRTPSinkandRTCP(void* streamToken, RTPSink*& rtpSink, RTCPInstance*& rtcp) {
     rtpSink = nullptr;
-    BackchannelStreamState* state = (BackchannelStreamState*)streamToken;
-    if (state) {
-        rtcp = state->rtcpInstance;
-    } else {
-        rtcp = nullptr;
-    }
+    rtcp = nullptr;
 }
