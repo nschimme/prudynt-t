@@ -1,21 +1,21 @@
 #ifndef RTSP_hpp
 #define RTSP_hpp
 
-#include "liveMedia.hh"
 #include "BasicUsageEnvironment.hh"
-#include "IMPServerMediaSubsession.hpp"
 #include "IMPAudioServerMediaSubsession.hpp"
 #include "IMPDeviceSource.hpp"
 #include "IMPEncoder.hpp"
+#include "IMPServerMediaSubsession.hpp"
 #include "Logger.hpp"
+#include "liveMedia.hh"
 
 class RTSP
 {
 public:
-    RTSP(){};
+    RTSP() {};
     void addSubsession(int chnNr, _stream &stream);
     void start();
-    static void *run(void* arg);
+    static void *run(void *arg);
 
 private:
     UsageEnvironment *env{};

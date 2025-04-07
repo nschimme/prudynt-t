@@ -3,9 +3,6 @@
 #include "Logger.hpp"
 #include "globals.hpp"
 
-#include <RTPSource.hh>
-#include <vector>
-
 #define MODULE "BackchannelSink"
 
 #define TIMEOUT_MICROSECONDS 500000 // Timeout set to 500ms

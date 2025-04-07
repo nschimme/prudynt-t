@@ -3,9 +3,6 @@
 #include "BackchannelSink.hpp"
 #include "Logger.hpp"
 
-#include <cstring>
-#include <liveMedia.hh>
-
 #define MODULE "BackchannelStreamState"
 
 BackchannelStreamState::BackchannelStreamState(UsageEnvironment &env,

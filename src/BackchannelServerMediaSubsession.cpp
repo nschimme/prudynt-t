@@ -7,14 +7,7 @@
 #include "Logger.hpp"
 #include "globals.hpp"
 
-#include <BasicUsageEnvironment.hh>
 #include <GroupsockHelper.hh>
-#include <NetAddress.hh>
-#include <SimpleRTPSource.hh>
-#include <cstring>
-#include <liveMedia.hh>
-#include <string>
-#include <unistd.h>
 
 #define MODULE "BackchannelSubsession"
 

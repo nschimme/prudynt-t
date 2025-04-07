@@ -10,7 +10,6 @@
 #include <BasicUsageEnvironment.hh>
 #include <cstdint>
 #include <liveMedia.hh>
-#include <vector>
 
 class BackchannelSink : public MediaSink
 {

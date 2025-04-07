@@ -4,16 +4,10 @@
 #include "globals.hpp"
 
 #include <cassert>
-#include <cerrno>
 #include <cmath>
-#include <cstdint>
-#include <cstring>
-#include <fcntl.h>
-#include <unistd.h>
 #include <vector>
 
 #include <imp/imp_audio.h>
-#include <sys/wait.h>
 
 #define MODULE "BackchannelProcessor"
 

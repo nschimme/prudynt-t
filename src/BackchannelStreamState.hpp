@@ -7,9 +7,6 @@
 #include "BackchannelSink.hpp"
 #include "Logger.hpp"
 
-#include <BasicUsageEnvironment.hh>
-#include <Boolean.hh>
-#include <NetAddress.hh>
 #include <liveMedia.hh>
 
 struct UdpTransportDetails
