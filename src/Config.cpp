@@ -139,10 +139,6 @@ std::vector<ConfigItem<const char *>> CFG::getCharItems()
             std::set<std::string> a = {"OPUS", "AAC", "PCM", "G711A", "G711U", "G726"};
             return a.count(std::string(v)) == 1;
         }},
-        {"audio.output_format", audio.output_format, "G711U", [](const char *v) {
-            std::set<std::string> a = {"G711A", "G711U"};
-            return a.count(std::string(v)) == 1;
-        }},
 #endif
         {"general.loglevel", general.loglevel, "INFO", [](const char *v) {
             std::set<std::string> a = {"EMERGENCY", "ALERT", "CRITICAL", "ERROR", "WARN", "NOTICE", "INFO", "DEBUG"};

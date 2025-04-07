@@ -149,7 +149,6 @@ struct _audio {
     int input_bitrate;
     int input_gain;
     int input_sample_rate;
-    const char *output_format;
 #if defined(LIB_AUDIO_PROCESSING)
     int input_alc_gain;
     int input_noise_suppression;
