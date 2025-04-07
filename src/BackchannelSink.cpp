@@ -13,6 +13,8 @@
 
 #define MODULE "BackchannelSink"
 
+#define TIMEOUT_SECONDS 5
+
 std::atomic<bool> BackchannelSink::gIsAudioOutputBusy{false};
 
 BackchannelSink* BackchannelSink::createNew(UsageEnvironment& env,
@@ -197,7 +199,7 @@ void BackchannelSink::afterGettingFrame1(unsigned frameSize, unsigned numTruncat
 
 void BackchannelSink::scheduleTimeoutCheck() {
     fTimeoutTask = envir().taskScheduler().scheduleDelayedTask(
-        kAudioDataTimeoutSeconds * 1000000,
+        TIMEOUT_SECONDS * 1000000,
         (TaskFunc*)timeoutCheck,
         this);
 }
@@ -217,10 +219,10 @@ void BackchannelSink::timeoutCheck1() {
     }
 
 
-    LOG_WARN("Audio data timeout detected for session " << fClientSessionId << " (>" << kAudioDataTimeoutSeconds << "s).");
+    LOG_WARN("Audio data timeout detected for session " << fClientSessionId);
 
     if (fHaveAudioOutputLock) {
-        LOG_WARN("Releasing audio lock due to timeout for session " << fClientSessionId << ".");
+        LOG_WARN("Releasing audio lock due to timeout for session " << fClientSessionId);
         gIsAudioOutputBusy.store(false);
         fHaveAudioOutputLock = false;
     } else {

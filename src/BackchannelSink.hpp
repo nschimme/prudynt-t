@@ -66,7 +66,6 @@ private:
 
     unsigned fClientSessionId;
     TaskToken fTimeoutTask;
-    static const unsigned kAudioDataTimeoutSeconds = 15;
 
     const IMPBackchannelFormat fFormat;
 };
