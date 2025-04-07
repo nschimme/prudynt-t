@@ -1,5 +1,5 @@
-#ifndef BACKCHANNEL_SINK_FRAMED_SOURCE_HPP
-#define BACKCHANNEL_SINK_FRAMED_SOURCE_HPP
+#ifndef BACKCHANNEL_SINK_HPP
+#define BACKCHANNEL_SINK_HPP
 
 #include "IMPBackchannel.hpp"
 #include "Logger.hpp"
@@ -44,7 +44,6 @@ private:
                             struct timeval presentationTime);
 
     static void staticOnSourceClosure(void *clientData);
-    void onSourceClosure1();
 
     // Helper functions for sending frames to the processor queue
     void sendBackchannelFrame(const uint8_t *payload,
@@ -65,4 +64,4 @@ private:
     const IMPBackchannelFormat fFormat;
 };
 
-#endif // BACKCHANNEL_SINK_FRAMED_SOURCE_HPP
+#endif // BACKCHANNEL_SINK_HPP

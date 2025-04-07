@@ -63,7 +63,7 @@ private:
     char *fSDPLines = nullptr;      // Cached SDP lines
     char fCNAME[MAX_CNAME_LEN + 1]; // For RTCP
     portNumBits fInitialPortNum;    // Starting port for UDP allocation
-    Boolean fMultiplexRTCPWithRTP;  // Whether to multiplex RTCP with RTP
+    bool fMultiplexRTCPWithRTP;     // Whether to multiplex RTCP with RTP
     IMPBackchannelFormat fFormat;   // Audio format for this subsession
 
     int estimatedBitrate();

@@ -17,9 +17,9 @@ public:
     void run();
 
 private:
-    static std::vector<int16_t> resampleLinear(const std::vector<int16_t> &input_pcm,
-                                               int input_rate,
-                                               int output_rate);
+    std::vector<int16_t> resampleLinear(const std::vector<int16_t> &input_pcm,
+                                        int input_rate,
+                                        int output_rate);
 
     bool initPipe();
     void closePipe();

@@ -230,7 +230,7 @@ bool BackchannelProcessor::writePcmToPipe(const std::vector<int16_t> &pcmBuffer)
 
     if (bytesWritten == static_cast<ssize_t>(bytesToWrite))
     {
-        // All bytes written successfully
+        // Bytes written match expected size
     }
     else if (bytesWritten >= 0)
     {
@@ -289,7 +289,7 @@ bool BackchannelProcessor::processFrame(const BackchannelFrame &frame)
     if (frame.format != IMPBackchannelFormat::OPUS && input_rate != target_rate)
     {
         // Resample the original decoded (mono) buffer for non-Opus formats
-        resampled_pcm = BackchannelProcessor::resampleLinear(decoded_pcm, input_rate, target_rate);
+        resampled_pcm = resampleLinear(decoded_pcm, input_rate, target_rate);
         buffer_to_write = &resampled_pcm;
     }
 

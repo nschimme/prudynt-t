@@ -29,7 +29,7 @@ BackchannelServerMediaSubsession::BackchannelServerMediaSubsession(UsageEnvironm
     : OnDemandServerMediaSubsession(env, False)
     , fSDPLines(nullptr)
     , fInitialPortNum(6970)
-    , fMultiplexRTCPWithRTP(False)
+    , fMultiplexRTCPWithRTP(false)
     , fFormat(format)
 {
     LOG_DEBUG("Subsession created for channel " << static_cast<int>(fFormat));

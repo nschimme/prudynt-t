@@ -260,10 +260,3 @@ void BackchannelSink::staticOnSourceClosure(void *clientData)
         LOG_ERROR("staticOnSourceClosure called with invalid clientData");
     }
 }
-
-void BackchannelSink::onSourceClosure1()
-{
-    LOG_DEBUG("Source closure detected for session " << getClientSessionId()
-                                                     << ". Scheduling stop.");
-    stopPlaying();
-}
