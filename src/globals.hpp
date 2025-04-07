@@ -138,23 +138,15 @@ struct video_stream
      IMPBackchannel* imp_backchannel;
      std::atomic<bool> running;
      pthread_t thread;
-     // std::atomic<int> active_sessions{0}; // Removed session counter
-     std::binary_semaphore has_started{0};
-
 
      backchannel_stream()
          : inputQueue(std::make_shared<MsgChannel<BackchannelFrame>>(BACKCHANNEL_QUEUE_SIZE)),
            imp_backchannel(nullptr),
            running(false) {}
-
-     ~backchannel_stream() { // Destructor to clean up
-         delete imp_backchannel;
-         imp_backchannel = nullptr;
-     }
  };
 
 
- extern std::condition_variable global_cv_worker_restart;
+extern std::condition_variable global_cv_worker_restart;
 
 extern bool global_restart;
 extern bool global_restart_rtsp;

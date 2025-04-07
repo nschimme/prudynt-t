@@ -859,6 +859,8 @@ void *Worker::backchannel_processor(void *arg)
 {
     LOG_INFO("Backchannel processor thread starting...");
 
+    StartHelper *sh = static_cast<StartHelper *>(arg);
+
     if (!global_backchannel) {
         LOG_ERROR("global_backchannel is null. Backchannel processor cannot start. Exiting.");
         return nullptr;
@@ -867,7 +869,7 @@ void *Worker::backchannel_processor(void *arg)
     global_backchannel->imp_backchannel = IMPBackchannel::createNew();
  
     BackchannelProcessor processor;
-    global_backchannel->has_started.release();
+    sh->has_started.release();
     processor.run();
 
     LOG_INFO("Backchannel processor thread finished.");

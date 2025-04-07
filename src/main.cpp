@@ -33,8 +33,8 @@ std::shared_ptr<jpeg_stream> global_jpeg[NUM_VIDEO_CHANNELS] = {nullptr};
 std::shared_ptr<video_stream> global_video[NUM_VIDEO_CHANNELS] = {nullptr};
 #if defined(AUDIO_SUPPORT)
 std::shared_ptr<audio_stream> global_audio[NUM_AUDIO_CHANNELS] = {nullptr};
-#endif
 std::shared_ptr<backchannel_stream> global_backchannel = nullptr;
+#endif
 
 std::shared_ptr<CFG> cfg = std::make_shared<CFG>();
 
@@ -78,7 +78,7 @@ int main(int argc, const char *argv[])
     pthread_t osd_thread;
     pthread_t rtsp_thread;
     pthread_t motion_thread;
-    pthread_t backchannel_thread; // Added thread handle for backchannel
+    pthread_t backchannel_thread;
 
     if (Logger::init(cfg->general.loglevel))
     {
@@ -114,11 +114,13 @@ int main(int argc, const char *argv[])
     while (true)
     {
 #if defined(AUDIO_SUPPORT)
-        if (cfg->audio.output_enabled && (global_restart_audio || startup)) {
-             int ret = pthread_create(&backchannel_thread, nullptr, Worker::backchannel_processor, nullptr);
+        if (cfg->audio.output_enabled && (global_restart_audio || startup))
+        {
+             StartHelper sh;
+             int ret = pthread_create(&backchannel_thread, nullptr, Worker::backchannel_processor, &sh);
              LOG_DEBUG_OR_ERROR(ret, "create backchannel processor thread");
-             // wait for initialization done (pipe opened)
-             global_backchannel->has_started.acquire();
+             // wait for initialization done
+             sh.has_started.acquire();
         }
 
         global_restart = true;
