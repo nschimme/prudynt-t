@@ -16,10 +16,32 @@ class Groupsock;
 class RTCPInstance;
 class TLSState;
 class TaskScheduler; // For TaskFunc
-// Removed incorrect forward declaration of ServerRequestAlternativeByteHandler (it's a typedef)
-// Ensure RTPInterface.hh (where it's defined) is included where needed, likely via liveMedia.hh
+// ServerRequestAlternativeByteHandler is a typedef defined in RTPInterface.hh (included via liveMedia.hh)
 
-// Removed BackchannelDestinations struct definition - managed internally now
+// Define structs for transport details
+struct UdpTransportDetails {
+    struct sockaddr_storage destAddr;
+    Port rtpDestPort;
+    Port rtcpDestPort;
+};
+
+struct TcpTransportDetails {
+    int tcpSocketNum;
+    unsigned char rtpChannelId;
+    unsigned char rtcpChannelId;
+    TLSState* tlsState;
+};
+
+// Define the union
+union TransportSpecificDetails {
+    UdpTransportDetails u; // UDP details
+    TcpTransportDetails t; // TCP details
+
+    // Provide default constructor/destructor for the union
+    TransportSpecificDetails() { /* memset(this, 0, sizeof(*this)); // Optional: Zero-initialize */ }
+    ~TransportSpecificDetails() {}
+};
+
 
 class BackchannelStreamState {
     friend class BackchannelServerMediaSubsession;
@@ -55,15 +77,9 @@ private:
     RTCPInstance* rtcpInstance;
     unsigned clientSessionId;
 
-    // Stored destination details:
-    Boolean fIsTCP;
-    struct sockaddr_storage fDestAddr; // UDP
-    Port fRtpDestPort;                 // UDP
-    Port fRtcpDestPort;                // UDP
-    int fTcpSocketNum;                 // TCP
-    unsigned char fRtpChannelId;       // TCP
-    unsigned char fRtcpChannelId;      // TCP
-    TLSState* fTlsState;               // TCP
+    // Transport details stored in a union
+    Boolean fIsTCP;                     // Flag to indicate active union member
+    TransportSpecificDetails fTransport; // Union holding either UDP or TCP details
 };
 
 #endif // BACKCHANNEL_STREAM_STATE_HPP

@@ -20,14 +20,25 @@
                                                 unsigned char _rtpChannelId,
                                                 unsigned char _rtcpChannelId,
                                                 TLSState* _tlsState)
-     : master(_master), rtpSource(_rtpSource), mediaSink(_mediaSink),
-       rtpGS(_rtpGS), rtcpGS(_rtcpGS), rtcpInstance(nullptr), clientSessionId(_clientSessionId),
-       // Initialize new members
-       fIsTCP(_isTCP), fDestAddr(_destAddr), fRtpDestPort(_rtpDestPort), fRtcpDestPort(_rtcpDestPort),
-       fTcpSocketNum(_tcpSocketNum), fRtpChannelId(_rtpChannelId), fRtcpChannelId(_rtcpChannelId), fTlsState(_tlsState)
- {
-     LOG_DEBUG("Created for session " << clientSessionId << " (TCP: " << fIsTCP << ")");
- }
+      : master(_master), rtpSource(_rtpSource), mediaSink(_mediaSink),
+        rtpGS(_rtpGS), rtcpGS(_rtcpGS), rtcpInstance(nullptr), clientSessionId(_clientSessionId),
+        // Initialize transport flag
+        fIsTCP(_isTCP)
+        // fTransport union is initialized below based on fIsTCP
+  {
+      LOG_DEBUG("Created for session " << clientSessionId << " (TCP: " << fIsTCP << ")");
+      // Initialize the appropriate part of the union
+      if (fIsTCP) {
+          fTransport.t.tcpSocketNum = _tcpSocketNum;
+          fTransport.t.rtpChannelId = _rtpChannelId;
+          fTransport.t.rtcpChannelId = _rtcpChannelId;
+          fTransport.t.tlsState = _tlsState;
+      } else {
+          fTransport.u.destAddr = _destAddr;
+          fTransport.u.rtpDestPort = _rtpDestPort;
+          fTransport.u.rtcpDestPort = _rtcpDestPort;
+      }
+  }
 
 BackchannelStreamState::~BackchannelStreamState()
 {
@@ -63,36 +74,36 @@ BackchannelStreamState::~BackchannelStreamState()
               // Set the general RR handler
               rtcpInstance->setRRHandler(rtcpRRHandler, rtcpRRHandlerClientData);
 
-              // Configure transport based on stored fIsTCP flag
-              if (fIsTCP) {
-                  LOG_DEBUG("Configuring stream for TCP (socket " << fTcpSocketNum << ", RTP ch " << (int)fRtpChannelId << ", RTCP ch " << (int)fRtcpChannelId << ")");
-                  // Set socket and channel IDs for RTP source and RTCP instance
-                  rtpSource->setStreamSocket(fTcpSocketNum, fRtpChannelId, fTlsState);
-                  rtcpInstance->addStreamSocket(fTcpSocketNum, fRtcpChannelId, fTlsState);
+               // Configure transport based on stored fIsTCP flag and union data
+               if (fIsTCP) {
+                   LOG_DEBUG("Configuring stream for TCP (socket " << fTransport.t.tcpSocketNum << ", RTP ch " << (int)fTransport.t.rtpChannelId << ", RTCP ch " << (int)fTransport.t.rtcpChannelId << ")");
+                   // Set socket and channel IDs for RTP source and RTCP instance
+                   rtpSource->setStreamSocket(fTransport.t.tcpSocketNum, fTransport.t.rtpChannelId, fTransport.t.tlsState);
+                   rtcpInstance->addStreamSocket(fTransport.t.tcpSocketNum, fTransport.t.rtcpChannelId, fTransport.t.tlsState);
 
-                  // Set the alternative byte handler for TCP
-                  RTPInterface::setServerRequestAlternativeByteHandler(master.envir(), fTcpSocketNum,
-                                                                       serverRequestAlternativeByteHandler, serverRequestAlternativeByteHandlerClientData);
+                   // Set the alternative byte handler for TCP
+                   RTPInterface::setServerRequestAlternativeByteHandler(master.envir(), fTransport.t.tcpSocketNum,
+                                                                        serverRequestAlternativeByteHandler, serverRequestAlternativeByteHandlerClientData);
 
-                  // Set specific RR handler for TCP (using socket num as address identifier)
-                  struct sockaddr_storage tcpSocketNumAsAddress;
-                  memset(&tcpSocketNumAsAddress, 0, sizeof(tcpSocketNumAsAddress));
-                  tcpSocketNumAsAddress.ss_family = AF_INET; // Needs to be a valid family
-                  ((struct sockaddr_in&)tcpSocketNumAsAddress).sin_addr.s_addr = htonl(fTcpSocketNum); // Use socket num (ensure network byte order?)
-                  rtcpInstance->setSpecificRRHandler(tcpSocketNumAsAddress, fRtcpChannelId,
-                                                     rtcpRRHandler, rtcpRRHandlerClientData);
+                   // Set specific RR handler for TCP (using socket num as address identifier)
+                   struct sockaddr_storage tcpSocketNumAsAddress;
+                   memset(&tcpSocketNumAsAddress, 0, sizeof(tcpSocketNumAsAddress));
+                   tcpSocketNumAsAddress.ss_family = AF_INET; // Needs to be a valid family
+                   ((struct sockaddr_in&)tcpSocketNumAsAddress).sin_addr.s_addr = htonl(fTransport.t.tcpSocketNum); // Use socket num (ensure network byte order?)
+                   rtcpInstance->setSpecificRRHandler(tcpSocketNumAsAddress, fTransport.t.rtcpChannelId,
+                                                      rtcpRRHandler, rtcpRRHandlerClientData);
 
-              } else { // UDP
-                  LOG_DEBUG("Configuring stream for UDP");
-                  // Add destinations to groupsocks using stored address/ports
-                  if (rtpGS) rtpGS->addDestination(fDestAddr, fRtpDestPort, clientSessionId);
-                  if (rtcpGS) rtcpGS->addDestination(fDestAddr, fRtcpDestPort, clientSessionId);
-                  // Set specific RR handler for UDP using address/port
-                  rtcpInstance->setSpecificRRHandler(fDestAddr, fRtcpDestPort,
-                                                     rtcpRRHandler, rtcpRRHandlerClientData);
-              }
+               } else { // UDP
+                   LOG_DEBUG("Configuring stream for UDP");
+                   // Add destinations to groupsocks using stored address/ports from union
+                   if (rtpGS) rtpGS->addDestination(fTransport.u.destAddr, fTransport.u.rtpDestPort, clientSessionId);
+                   if (rtcpGS) rtcpGS->addDestination(fTransport.u.destAddr, fTransport.u.rtcpDestPort, clientSessionId);
+                   // Set specific RR handler for UDP using address/port from union
+                   rtcpInstance->setSpecificRRHandler(fTransport.u.destAddr, fTransport.u.rtcpDestPort,
+                                                      rtcpRRHandler, rtcpRRHandlerClientData);
+               }
 
-               // Send initial RTCP report
+                // Send initial RTCP report
                rtcpInstance->sendReport();
 
            } else {
