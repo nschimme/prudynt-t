@@ -30,9 +30,6 @@
 
        virtual ~BackchannelServerMediaSubsession();
 
-   // Called by BackchannelStreamState destructor
-   virtual void closeStreamSource(FramedSource *inputSource);
-
    protected:
        BackchannelServerMediaSubsession(UsageEnvironment& env, IMPBackchannelFormat format);
 
@@ -58,7 +55,7 @@
                               ServerRequestAlternativeByteHandler* serverRequestAlternativeByteHandler,
                               void* serverRequestAlternativeByteHandlerClientData);
       virtual void getRTPSinkandRTCP(void* streamToken, RTPSink*& rtpSink, RTCPInstance*& rtcp);
-      virtual void deleteStream(unsigned clientSessionId, void*& streamToken); // Handles cleanup
+      virtual void deleteStream(unsigned clientSessionId, void*& streamToken);
 
       // --- Required virtual functions (receive-only implementation) ---
       virtual FramedSource* createNewStreamSource(unsigned clientSessionId, unsigned& estBitrate);

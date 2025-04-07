@@ -7,7 +7,8 @@
 
  #define MODULE "BackchannelStreamState"
 
-  BackchannelStreamState::BackchannelStreamState(BackchannelServerMediaSubsession& _master,
+  // Updated constructor implementation - takes env and cname instead of master
+  BackchannelStreamState::BackchannelStreamState(UsageEnvironment& env, char const* cname,
                                                  RTPSource* _rtpSource, BackchannelSink* _mediaSink,
                                                  Groupsock* _rtpGS, Groupsock* _rtcpGS, unsigned _clientSessionId,
                                                  Boolean _isTCP,
@@ -18,7 +19,8 @@
                                                  unsigned char _rtpChannelId,
                                                  unsigned char _rtcpChannelId,
                                                  TLSState* _tlsState)
-       : master(_master), rtpSource(_rtpSource), mediaSink(_mediaSink),
+       : fEnv(env), fCNAME(cname), // Initialize new members
+         rtpSource(_rtpSource), mediaSink(_mediaSink),
          rtpGS(_rtpGS), rtcpGS(_rtcpGS), rtcpInstance(nullptr), clientSessionId(_clientSessionId),
          fIsTCP(_isTCP)
    {
@@ -33,22 +35,22 @@
            fTransport.u.destAddr = _destAddr;
            fTransport.u.rtpDestPort = _rtpDestPort;
            fTransport.u.rtcpDestPort = _rtcpDestPort;
-       }
-   }
+      }
+  }
 
  BackchannelStreamState::~BackchannelStreamState()
  {
      // LOG_DEBUG("Destroyed for session " << clientSessionId); // Removed - less verbose
-     Medium::close(rtcpInstance); // Close RTCP instance first
+     Medium::close(rtcpInstance);
 
      if (mediaSink && rtpSource) {
-         mediaSink->stopPlaying(); // Tell sink to stop processing
+         mediaSink->stopPlaying();
      }
 
-     master.closeStreamSource(rtpSource); // Close the source via the subsession
-     Medium::close(mediaSink); // Close the sink
+     Medium::close(rtpSource);
+     Medium::close(mediaSink);
 
-     // Delete groupsocks (safe even if null)
+     // Delete groupsocks
      delete rtpGS;
      if (rtcpGS != nullptr && rtcpGS != rtpGS) { // Avoid double delete if multiplexing
          delete rtcpGS;
@@ -60,24 +62,25 @@
                                            void* serverRequestAlternativeByteHandlerClientData)
  {
      if (mediaSink && rtpSource) {
-         // Create RTCP instance
-         rtcpInstance = RTCPInstance::createNew(master.envir(), rtcpGS,
-                                                64 /*est BW kbps*/, (unsigned char*)master.fCNAME,
-                                                nullptr /*sink*/, rtpSource /*source*/,
-                                                True /*is server*/);
-         if (rtcpInstance) {
+          // Create RTCP instance using stored env and CNAME
+          rtcpInstance = RTCPInstance::createNew(fEnv, rtcpGS,
+                                                 64 /*est BW kbps*/, (unsigned char*)fCNAME,
+                                                 nullptr /*sink*/, rtpSource /*source*/,
+                                                 True /*is server*/);
+          if (rtcpInstance) {
               rtcpInstance->setRRHandler(rtcpRRHandler, rtcpRRHandlerClientData);
 
                // Configure transport based on stored flag and union data
                if (fIsTCP) {
                    // LOG_DEBUG("Configuring stream for TCP (socket " << fTransport.t.tcpSocketNum << ", RTP ch " << (int)fTransport.t.rtpChannelId << ", RTCP ch " << (int)fTransport.t.rtcpChannelId << ")"); // Removed - less verbose
-                   rtpSource->setStreamSocket(fTransport.t.tcpSocketNum, fTransport.t.rtpChannelId, fTransport.t.tlsState);
-                   rtcpInstance->addStreamSocket(fTransport.t.tcpSocketNum, fTransport.t.rtcpChannelId, fTransport.t.tlsState);
+                    rtpSource->setStreamSocket(fTransport.t.tcpSocketNum, fTransport.t.rtpChannelId, fTransport.t.tlsState);
+                    rtcpInstance->addStreamSocket(fTransport.t.tcpSocketNum, fTransport.t.rtcpChannelId, fTransport.t.tlsState);
 
-                   RTPInterface::setServerRequestAlternativeByteHandler(master.envir(), fTransport.t.tcpSocketNum,
-                                                                        serverRequestAlternativeByteHandler, serverRequestAlternativeByteHandlerClientData);
+                    // Use stored env
+                    RTPInterface::setServerRequestAlternativeByteHandler(fEnv, fTransport.t.tcpSocketNum,
+                                                                         serverRequestAlternativeByteHandler, serverRequestAlternativeByteHandlerClientData);
 
-                   // Set specific RR handler for TCP
+                    // Set specific RR handler for TCP
                    struct sockaddr_storage tcpSocketNumAsAddress;
                    memset(&tcpSocketNumAsAddress, 0, sizeof(tcpSocketNumAsAddress));
                    tcpSocketNumAsAddress.ss_family = AF_INET;

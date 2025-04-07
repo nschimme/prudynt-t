@@ -42,10 +42,12 @@
 
 
  class BackchannelStreamState {
+     // Restore friendship to allow subsession access to private members
      friend class BackchannelServerMediaSubsession;
 
  public:
-     BackchannelStreamState(BackchannelServerMediaSubsession& _master,
+     // Constructor takes UsageEnvironment and CNAME instead of master reference
+     BackchannelStreamState(UsageEnvironment& env, char const* cname, // Replaced master
                             RTPSource* _rtpSource, BackchannelSink* _mediaSink,
                             Groupsock* _rtpGS, Groupsock* _rtcpGS, unsigned _clientSessionId,
                             Boolean _isTCP,
@@ -61,14 +63,17 @@
 
      // Configures transport and starts the sink playing
      void startPlaying(TaskFunc* rtcpRRHandler, void* rtcpRRHandlerClientData,
-                       ServerRequestAlternativeByteHandler* serverRequestAlternativeByteHandler,
-                       void* serverRequestAlternativeByteHandlerClientData);
+                        ServerRequestAlternativeByteHandler* serverRequestAlternativeByteHandler,
+                        void* serverRequestAlternativeByteHandlerClientData);
 
- private:
-     BackchannelServerMediaSubsession& master; // Reference to the parent subsession
-     RTPSource* rtpSource;                     // Source receiving RTP data
-     BackchannelSink* mediaSink;               // Sink processing received data
-     Groupsock* rtpGS;                         // Groupsock for RTP
+  private:
+      // Store UsageEnvironment and CNAME directly
+      UsageEnvironment& fEnv;
+      char const* fCNAME;                       // CNAME for RTCP reports
+      // BackchannelServerMediaSubsession& master; // Removed master reference
+      RTPSource* rtpSource;
+      BackchannelSink* mediaSink;
+      Groupsock* rtpGS;
      Groupsock* rtcpGS;                        // Groupsock for RTCP
      RTCPInstance* rtcpInstance;               // RTCP instance associated with the stream
      unsigned clientSessionId;                 // ID of the client for this stream

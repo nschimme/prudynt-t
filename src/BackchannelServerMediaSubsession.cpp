@@ -239,13 +239,14 @@
            return;
        }
 
-       // Create our custom stream state object, passing destination details
-       // LOG_DEBUG("Creating BackchannelStreamState for session " << clientSessionId); // Removed - less verbose
-       Boolean isTCP = (tcpSocketNum >= 0);
-       BackchannelStreamState* state = new BackchannelStreamState(*this, rtpSource, (BackchannelSink*)mediaSink, rtpGroupsock, rtcpGroupsock, clientSessionId,
-                                                                  isTCP,
-                                                                  destinationAddress, // Pass even if TCP, might be needed for RTCP handler key
-                                                                  clientRTPPort,
+        // Create our custom stream state object, passing destination details
+        // LOG_DEBUG("Creating BackchannelStreamState for session " << clientSessionId); // Removed - less verbose
+        Boolean isTCP = (tcpSocketNum >= 0);
+        BackchannelStreamState* state = new BackchannelStreamState(envir(), fCNAME, // Pass env and CNAME instead of *this
+                                                                   rtpSource, (BackchannelSink*)mediaSink, rtpGroupsock, rtcpGroupsock, clientSessionId,
+                                                                   isTCP,
+                                                                   destinationAddress,
+                                                                   clientRTPPort,
                                                                   clientRTCPPort,
                                                                   tcpSocketNum,
                                                                   rtpChannelId,
@@ -317,11 +318,6 @@
           rtcp = nullptr;
           // LOG_DEBUG("getRTPSinkandRTCP: No stream state or RTPSource found, returning NULL RTCP instance."); // Removed - less verbose
       }
-  }
-
-  void BackchannelServerMediaSubsession::closeStreamSource(FramedSource *inputSource) {
-       // LOG_DEBUG("Closing stream source (FramedSource): " << (int)inputSource); // Removed - less verbose
-       Medium::close(inputSource);
   }
 
   FramedSource* BackchannelServerMediaSubsession::createNewStreamSource(unsigned clientSessionId, unsigned& estBitrate) {
