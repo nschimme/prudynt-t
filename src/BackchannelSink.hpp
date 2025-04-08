@@ -44,8 +44,6 @@ private:
                             unsigned numTruncatedBytes,
                             struct timeval presentationTime);
 
-    static void staticOnSourceClosure(void *clientData);
-
     void sendBackchannelFrame(const uint8_t *payload,
                               unsigned payloadSize);
     void sendBackchannelStopFrame();
@@ -54,13 +52,14 @@ private:
     u_int8_t *fReceiveBuffer;
     int fReceiveBufferSize;
 
-    Boolean fIsActive;
+    bool fIsActive;
     MediaSink::afterPlayingFunc *fAfterFunc;
     void *fAfterClientData;
 
     unsigned fClientSessionId;
     TaskToken fTimeoutTask;
 
+    bool fIsSending;
     const IMPBackchannelFormat fFormat;
 };
 

@@ -20,11 +20,12 @@ BackchannelSink::BackchannelSink(UsageEnvironment &env,
     : MediaSink(env)
     , fRTPSource(nullptr)
     , fReceiveBufferSize(1024)
-    , fIsActive(False)
+    , fIsActive(false)
     , fAfterFunc(nullptr)
     , fAfterClientData(nullptr)
     , fClientSessionId(clientSessionId)
     , fTimeoutTask(nullptr)
+    , fIsSending(false)
     , fFormat(format)
 {
     LOG_DEBUG("Sink created for session " << fClientSessionId << " format "
@@ -75,7 +76,6 @@ void BackchannelSink::stopPlaying()
     // Set inactive *first* to prevent re-entrancy
     fIsActive = False;
 
-    // Send the stop signal exactly once when stopping an active sink
     sendBackchannelStopFrame();
 
     envir().taskScheduler().unscheduleDelayedTask(fTimeoutTask);
@@ -108,12 +108,8 @@ Boolean BackchannelSink::continuePlaying()
         return False;
     }
 
-    fRTPSource->getNextFrame(fReceiveBuffer,
-                             fReceiveBufferSize,
-                             afterGettingFrame,
-                             this,
-                             staticOnSourceClosure,
-                             this);
+    fRTPSource
+        ->getNextFrame(fReceiveBuffer, fReceiveBufferSize, afterGettingFrame, this, nullptr, this);
 
     return True;
 }
@@ -192,13 +188,15 @@ void BackchannelSink::timeoutCheck1()
         return;
     }
 
-    LOG_INFO("Audio data timeout detected for session "
-             << fClientSessionId << ". Sending stop signal and stopping sink.");
+    LOG_INFO("Audio data timeout detected for session " << fClientSessionId
+                                                        << ". Sending stop frame.");
     sendBackchannelStopFrame();
 }
 
 void BackchannelSink::sendBackchannelFrame(const uint8_t *payload, unsigned payloadSize)
 {
+    fIsSending = true;
+
     if (global_backchannel && global_backchannel->inputQueue)
     {
         BackchannelFrame bcFrame;
@@ -221,6 +219,11 @@ void BackchannelSink::sendBackchannelFrame(const uint8_t *payload, unsigned payl
 
 void BackchannelSink::sendBackchannelStopFrame()
 {
+    if (!fIsSending)
+    {
+        return;
+    }
+
     if (global_backchannel && global_backchannel->inputQueue)
     {
         BackchannelFrame stopFrame;
@@ -229,31 +232,19 @@ void BackchannelSink::sendBackchannelStopFrame()
         stopFrame.payload.clear(); // Zero-size payload indicates stop/timeout
         if (!global_backchannel->inputQueue->write(std::move(stopFrame)))
         {
-            LOG_WARN("Input queue full when trying to send stop signal for session "
+            LOG_WARN("Input queue full when trying to send stop frame for session "
                      << fClientSessionId);
         }
         else
         {
-            LOG_INFO("Sent stop signal (zero-payload frame) for session " << fClientSessionId);
+            fIsSending = false;
+            LOG_INFO("Sent stop frame (zero-payload frame) for session " << fClientSessionId);
         }
     }
     else
     {
-        LOG_ERROR("global_backchannel or input queue null, cannot send stop signal for "
+        LOG_ERROR("global_backchannel or input queue null, cannot send stop frame for "
                   "session "
                   << fClientSessionId);
-    }
-}
-
-void BackchannelSink::staticOnSourceClosure(void *clientData)
-{
-    BackchannelSink *sink = static_cast<BackchannelSink *>(clientData);
-    if (sink != nullptr)
-    {
-        sink->stopPlaying();
-    }
-    else
-    {
-        LOG_ERROR("staticOnSourceClosure called with invalid clientData");
     }
 }
