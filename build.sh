@@ -19,7 +19,7 @@ prudynt(){
 
 	/usr/bin/make -j$(nproc) \
 	ARCH= CROSS_COMPILE="${PRUDYNT_CROSS}" \
-	CFLAGS="-DPLATFORM_$1 $BIN_TYPE -O2 -DALLOW_RTSP_SERVER_PORT_REUSE=1 -DNO_OPENSSL=1 \
+	CFLAGS="-DPLATFORM_$1 $BIN_TYPE -g -DALLOW_RTSP_SERVER_PORT_REUSE=1 -DNO_OPENSSL=1 \
 	-isystem ./3rdparty/install/include \
 	-isystem ./3rdparty/install/include/liveMedia \
 	-isystem ./3rdparty/install/include/groupsock \

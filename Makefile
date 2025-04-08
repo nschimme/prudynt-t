@@ -99,6 +99,7 @@ $(VERSION_FILE): $(SRC_DIR)/version.tpl.hpp
 		sed 's/COMMIT_TAG/"$(commit_tag)"/g' $(SRC_DIR)/version.tpl.hpp > $(VERSION_FILE); \
 	fi
 
+
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.cpp $(VERSION_FILE)
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) -I$(LIBIMP_INC_DIR) -I$(LIBIMP_INC_DIR)/imp -I$(LIBIMP_INC_DIR)/sysutils -isystem $(THIRDPARTY_INC_DIR) -c $< -o $@
@@ -109,7 +110,7 @@ $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c $(VERSION_FILE)
 
 $(TARGET): $(OBJECTS) $(VERSION_FILE)
 	@mkdir -p $(@D)
-	$(CCACHE) $(CXX) $(LDFLAGS) -o $@ $(OBJECTS) $(LIBS) $(STRIP_FLAG)
+	$(CCACHE) $(CXX) $(LDFLAGS) -o $@ $(OBJECTS) $(LIBS)
 
 .PHONY: all clean
 
