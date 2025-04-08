@@ -26,7 +26,6 @@ struct TcpTransportDetails
 union TransportSpecificDetails {
     UdpTransportDetails u;
     TcpTransportDetails t;
-    bool isTCP;
 
     TransportSpecificDetails() {}
     ~TransportSpecificDetails() {}
@@ -72,6 +71,7 @@ private:
     RTCPInstance *rtcpInstance; // RTCP instance associated with the stream
     unsigned clientSessionId;   // ID of the client for this stream
 
+    Boolean fIsTCP;                      // Flag indicating TCP or UDP transport
     TransportSpecificDetails fTransport; // Union holding transport-specific details
 };
 
