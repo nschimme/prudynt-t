@@ -204,7 +204,7 @@ int Motion::init()
 
     for (int cell_index = 0; cell_index < total_cells; ++cell_index) {
         // Check if the index is valid and the corresponding boolean is true in the roi_mask vector
-        if (cell_index < cfg->motion.roi_mask.size() && cfg->motion.roi_mask[cell_index]) {
+        if (static_cast<size_t>(cell_index) < cfg->motion.roi_mask.size() && cfg->motion.roi_mask[cell_index]) {
             // Check if we have reached the hardware limit
             if (active_roi_count >= max_roi_limit) {
                 LOG_WARN("Hardware ROI limit (" << max_roi_limit << ") reached. Ignoring remaining active grid cells.");

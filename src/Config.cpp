@@ -606,7 +606,7 @@ bool CFG::updateConfig()
             motion_setting.remove(roi_path);
         }
         // Add the boolean setting
-        bool value = (i < motion.roi_mask.size()) ? motion.roi_mask[i] : true; // Default to true if vector is somehow smaller
+        bool value = (static_cast<size_t>(i) < motion.roi_mask.size()) ? motion.roi_mask[i] : true; // Default to true if vector is somehow smaller
         motion_setting.add(roi_path, Setting::TypeBoolean) = value;
     }
     LOG_DEBUG("Saved " << total_cells << " motion.roi_X settings.");
