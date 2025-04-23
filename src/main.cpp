@@ -235,7 +235,7 @@ int main(int argc, const char *argv[])
             global_backchannel->running = false;
             global_backchannel->should_grab_frames.notify_one();
             int ret = pthread_join(backchannel_thread, NULL);
-            LOG_DEBUG_OR_ERROR(ret, "join backchannel processor thread");
+            LOG_DEBUG_OR_ERROR(ret, "join backchannel thread");
         }
 
         if (global_restart_video)
@@ -256,32 +256,31 @@ int main(int argc, const char *argv[])
                 LOG_DEBUG_OR_ERROR(ret, "join osd thread");
             }
 
-            // --- Stop JPEG and Video Threads ---
-            int jpeg_chn = 0;      // Assuming only global_jpeg[0] is used
-
-            // Check if JPEG thread was running (use running flag as indicator)
-            if (global_jpeg[jpeg_chn]->running)
+            // stop jpeg
+            if (global_jpeg[0]->imp_encoder)
             {
-                // Join JPEG thread (consumer) first
-                JPEGWorker::deinit(jpeg_chn);
-                int ret = pthread_join(global_jpeg[jpeg_chn]->thread, NULL);
-                LOG_DEBUG_OR_ERROR(ret, "join jpeg thread " << jpeg_chn);
+                global_jpeg[0]->running = false;
+                global_jpeg[0]->should_grab_frames.notify_one();
+                int ret = pthread_join(global_jpeg[0]->thread, NULL);
+                LOG_DEBUG_OR_ERROR(ret, "join jpeg thread");
             }
 
-            // Stop Video Threads - ensuring producer is stopped after consumer (JPEG)
-            for (int chn = 0; chn < NUM_VIDEO_CHANNELS; ++chn)
+            // stop stream1
+            if (global_video[1]->imp_encoder)
             {
-                // Check if the video stream object exists and was running
-                // We check imp_encoder as a proxy for whether the thread was successfully started
-                if (global_video[chn] && global_video[chn]->imp_encoder)
-                {
-                    LOG_DEBUG("Stopping video thread " << chn);
-                    global_video[chn]->running = false;
-                    // Notify the condition variable in case the thread is waiting in idle state
-                    global_video[chn]->should_grab_frames.notify_one();
-                    int ret = pthread_join(global_video[chn]->thread, NULL);
-                    LOG_DEBUG_OR_ERROR(ret, "join video thread " << chn);
-                }
+                global_video[1]->running = false;
+                global_video[1]->should_grab_frames.notify_one();
+                int ret = pthread_join(global_video[1]->thread, NULL);
+                LOG_DEBUG_OR_ERROR(ret, "join stream1 thread");
+            }
+
+            // stop stream0
+            if (global_video[0]->imp_encoder)
+            {
+                global_video[0]->running = false;
+                global_video[0]->should_grab_frames.notify_one();
+                int ret = pthread_join(global_video[0]->thread, NULL);
+                LOG_DEBUG_OR_ERROR(ret, "join stream0 thread");
             }
         }
     }
