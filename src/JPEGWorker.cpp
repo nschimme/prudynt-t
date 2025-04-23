@@ -130,24 +130,11 @@ void *JPEGWorker::thread_entry(void *arg)
 {
     LOG_DEBUG("Start jpeg_grabber thread.");
 
-    StartHelper *sh = static_cast<StartHelper *>(arg);
-    // jpgChn is now determined by the index in the global_jpeg array,
-    // assuming StartHelper::encChn was previously used to derive this (e.g., encChn 2 -> jpgChn 0)
-    // If StartHelper needs adjustment, that's outside this refactor's scope.
-    // For now, assume a mapping exists or is handled elsewhere.
-    // Let's derive jpgChn based on the old logic for now, needs verification.
-    int jpgChn = sh->encChn - 2;
-    if (jpgChn < 0 || jpgChn >= NUM_VIDEO_CHANNELS)
-    {
-        LOG_ERROR("Invalid jpgChn derived from StartHelper encChn: " << sh->encChn);
-        sh->has_started.release(); // Signal main even on error
-        return nullptr;
-    }
+    int jpgChn = 0;
 
-    // Set the stream channel based on config (no IMP interaction needed here)
     global_jpeg[jpgChn]->streamChn = global_jpeg[jpgChn]->stream->jpeg_channel;
 
-    // Set stream dimensions based on linked video stream (no IMP interaction)
+    // Set stream dimensions based on linked video stream
     if (global_jpeg[jpgChn]->streamChn == 0)
     {
         cfg->stream2.width = cfg->stream0.width;
@@ -159,57 +146,47 @@ void *JPEGWorker::thread_entry(void *arg)
         cfg->stream2.height = cfg->stream1.height;
     }
 
-    // inform main that initialization is complete
-    sh->has_started.release();
-
-    global_jpeg[jpgChn]->active = true;
     global_jpeg[jpgChn]->running = true;
     JPEGWorker worker(jpgChn);
     worker.run();
-
 
     LOG_DEBUG("JPEGWorker thread finished for channel " << jpgChn);
     return nullptr;
 }
 
-void JPEGWorker::activateProducer(int jpgChn, int& first_request_delay_us)
+void JPEGWorker::activate_producer(int jpgChn, int &first_request_delay_us)
 {
-    if (jpgChn < 0 || jpgChn >= NUM_VIDEO_CHANNELS || !global_jpeg[jpgChn]) {
+    if (jpgChn < 0)
+    {
         LOG_ERROR("Invalid jpgChn provided to activateProducer: " << jpgChn);
         return;
     }
 
-    int responsible_worker_index = global_jpeg[jpgChn]->streamChn;
-    if (responsible_worker_index >= 0 && responsible_worker_index < NUM_VIDEO_CHANNELS && global_video[responsible_worker_index])
+    int streamChn = global_jpeg[jpgChn]->streamChn;
+    if (global_video[streamChn]->active)
     {
-        // Check if the responsible VideoWorker is inactive
-        if (!global_video[responsible_worker_index]->active)
-        {
-            LOG_DEBUG("Activating VideoWorker " << responsible_worker_index << " for JPEG channel " << jpgChn);
-            first_request_delay_us = cfg->websocket.first_image_delay * 1000; // Set delay if activating
-
-            // Lock mutex before modifying shared state and signaling
-            std::unique_lock<std::mutex> lock_stream{mutex_main};
-            global_video[responsible_worker_index]->run_for_jpeg = true;
-            global_video[responsible_worker_index]->should_grab_frames.notify_one();
-            lock_stream.unlock(); // Unlock before waiting
-
-            // Wait for the VideoWorker to signal activation
-            global_video[responsible_worker_index]->is_activated.acquire();
-            LOG_DEBUG("VideoWorker " << responsible_worker_index << " activated for JPEG channel " << jpgChn);
-        } else {
-             LOG_DDEBUG("VideoWorker " << responsible_worker_index << " already active for JPEG channel " << jpgChn);
-             first_request_delay_us = 0; // No extra delay needed if already active
-        }
-    } else {
-        LOG_ERROR("Invalid streamChn configured for JPEG channel " << jpgChn << ": " << responsible_worker_index);
+        // No extra delay needed if already active
+        first_request_delay_us = 0;
+        return;
     }
+
+    LOG_DEBUG("Activating VideoWorker " << streamChn << " for JPEG channel " << jpgChn);
+    first_request_delay_us = cfg->websocket.first_image_delay * 1000; // Set delay if activating
+
+    // Lock mutex before modifying shared state and signaling
+    std::unique_lock<std::mutex> lock_stream{mutex_main};
+    global_video[streamChn]->run_for_jpeg = true;
+    global_video[streamChn]->should_grab_frames.notify_one();
+    lock_stream.unlock();
+
+    global_video[streamChn]->is_activated.acquire();
+    LOG_DEBUG("VideoWorker " << streamChn << " activated for JPEG channel " << jpgChn);
 }
 
 void JPEGWorker::deinit(int jpgChn)
 {
     LOG_DEBUG("Sending shutdown signal (empty frame) for JPEG channel " << jpgChn);
-    JPEGFrame shutdown_signal;
+    JPEGFrame shutdown_signal{};
     global_jpeg[jpgChn]->running = false;
     global_jpeg[jpgChn]->msgChannel->write(shutdown_signal);
 }

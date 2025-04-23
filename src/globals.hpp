@@ -51,12 +51,9 @@ struct jpeg_stream
     int encChn;
     int streamChn;
     _stream *stream;
-    std::atomic<bool> running; // set to false to make jpeg_grabber thread exit
-    std::atomic<bool> active{false};
+    std::atomic<bool> running;
     pthread_t thread;
     IMPEncoder *imp_encoder;
-    std::condition_variable should_grab_frames;
-    std::binary_semaphore is_activated{0};
     std::shared_ptr<MsgChannel<JPEGFrame>> msgChannel;
 
     steady_clock::time_point last_image;
