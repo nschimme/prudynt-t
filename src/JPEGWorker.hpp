@@ -10,7 +10,7 @@ public:
     ~JPEGWorker();
 
     static void *thread_entry(void *arg);
-    static void activate_producer(int jpgChn, int& first_request_delay_us);
+    static void activateProducer(int jpgChn, int& first_request_delay_us);
     static void deinit(int jpgChn);
 
 private:

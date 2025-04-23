@@ -114,7 +114,7 @@ void VideoWorker::handleVideoStream(IMPEncoderStream &stream)
 void VideoWorker::handleJpegStream()
 {
     // Check if this worker is responsible for the specified JPEG channel
-    if (jpgChn < 0 || global_jpeg[jpgChn]->streamChn != encChn)
+    if (jpgChn < 0 || jpgChn >= NUM_VIDEO_CHANNELS || global_jpeg[jpgChn]->streamChn != encChn)
     {
         return; // Not responsible for this JPEG channel
     }
