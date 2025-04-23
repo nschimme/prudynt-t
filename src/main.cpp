@@ -1,22 +1,23 @@
-#include <chrono>
-#include <thread>
-#include <atomic>
-#include <condition_variable>
-#include "RTSP.hpp"
-#include "Logger.hpp"
-#include "Config.hpp"
-#include "WS.hpp"
-#include "version.hpp"
-#include "ConfigWatcher.hpp"
 #include "AudioWorker.hpp"
 #include "BackchannelWorker.hpp"
-#include "VideoWorker.hpp"
-#include "JPEGWorker.hpp"
-#include "globals.hpp"
-#include "IMPSystem.hpp"
-#include "Motion.hpp"
-#include "WorkerUtils.hpp"
+#include "Config.hpp"
+#include "ConfigWatcher.hpp"
 #include "IMPBackchannel.hpp"
+#include "IMPSystem.hpp"
+#include "JPEGWorker.hpp"
+#include "Logger.hpp"
+#include "Motion.hpp"
+#include "RTSP.hpp"
+#include "VideoWorker.hpp"
+#include "WS.hpp"
+#include "WorkerUtils.hpp"
+#include "globals.hpp"
+#include "version.hpp"
+
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <thread>
 using namespace std::chrono;
 
 std::mutex mutex_main;
@@ -67,8 +68,11 @@ bool timesync_wait()
 void start_video(int encChn)
 {
     StartHelper sh{encChn};
-    int ret = pthread_create(&global_video[encChn]->thread, nullptr, VideoWorker::thread_entry, static_cast<void *>(&sh));
-    LOG_DEBUG_OR_ERROR(ret, "create video["<< encChn << "] thread");
+    int ret = pthread_create(&global_video[encChn]->thread,
+                             nullptr,
+                             VideoWorker::thread_entry,
+                             static_cast<void *>(&sh));
+    LOG_DEBUG_OR_ERROR(ret, "create video[" << encChn << "] thread");
 
     // wait for initialization done
     sh.has_started.acquire();
@@ -121,19 +125,25 @@ int main(int argc, const char *argv[])
 #if defined(AUDIO_SUPPORT)
         if (cfg->audio.output_enabled && (global_restart_audio || startup))
         {
-             int ret = pthread_create(&backchannel_thread, nullptr, BackchannelWorker::thread_entry, NULL);
-             LOG_DEBUG_OR_ERROR(ret, "create backchannel thread");
+            int ret = pthread_create(&backchannel_thread,
+                                     nullptr,
+                                     BackchannelWorker::thread_entry,
+                                     NULL);
+            LOG_DEBUG_OR_ERROR(ret, "create backchannel thread");
         }
 
         if (cfg->audio.input_enabled && (global_restart_audio || startup))
         {
             StartHelper sh{0};
-            int ret = pthread_create(&global_audio[0]->thread, nullptr, AudioWorker::thread_entry, static_cast<void *>(&sh));
+            int ret = pthread_create(&global_audio[0]->thread,
+                                     nullptr,
+                                     AudioWorker::thread_entry,
+                                     static_cast<void *>(&sh));
             LOG_DEBUG_OR_ERROR(ret, "create audio thread");
             // wait for initialization done
             sh.has_started.acquire();
         }
-#endif        
+#endif
         if (global_restart_video || startup)
         {
             if (cfg->stream0.enabled)
@@ -149,7 +159,10 @@ int main(int argc, const char *argv[])
             if (cfg->stream2.enabled)
             {
                 StartHelper sh{2};
-                int ret = pthread_create(&global_jpeg[0]->thread, nullptr, JPEGWorker::thread_entry, static_cast<void *>(&sh));
+                int ret = pthread_create(&global_jpeg[0]->thread,
+                                         nullptr,
+                                         JPEGWorker::thread_entry,
+                                         static_cast<void *>(&sh));
                 LOG_DEBUG_OR_ERROR(ret, "create JPEG thread");
                 // wait for initialization done
                 sh.has_started.acquire();
@@ -165,7 +178,7 @@ int main(int argc, const char *argv[])
             {
                 int ret = pthread_create(&motion_thread, nullptr, Motion::run, &motion);
                 LOG_DEBUG_OR_ERROR(ret, "create motion thread");
-            }            
+            }
         }
 
         // start rtsp server
@@ -180,22 +193,22 @@ int main(int argc, const char *argv[])
          * OSD startup delay.
          */
         usleep(250000 + (cfg->stream0.osd.start_delay * 1000) + cfg->stream1.osd.start_delay * 1000);
-        
+
         LOG_DEBUG("main thread is going to sleep");
         std::unique_lock lck(mutex_main);
-        
+
         startup = false;
         global_restart = false;
         global_restart_video = false;
         global_restart_audio = false;
-        global_restart_rtsp = false;        
-        
+        global_restart_rtsp = false;
+
         while (!global_restart_rtsp && !global_restart_video && !global_restart_audio)
             global_cv_worker_restart.wait(lck);
         lck.unlock();
 
         global_restart = true;
-        
+
         if (global_restart_rtsp)
         {
             // stop rtsp thread
@@ -204,7 +217,7 @@ int main(int argc, const char *argv[])
                 global_rtsp_thread_signal = 1;
                 int ret = pthread_join(rtsp_thread, NULL);
                 LOG_DEBUG_OR_ERROR(ret, "join rtsp thread");
-            }        
+            }
         }
 
         // stop audio
@@ -219,10 +232,10 @@ int main(int argc, const char *argv[])
         // stop backchannel
         if (global_backchannel && global_restart_audio)
         {
-             global_backchannel->running = false;
-             global_backchannel->should_grab_frames.notify_one();
-             int ret = pthread_join(backchannel_thread, NULL);
-             LOG_DEBUG_OR_ERROR(ret, "join backchannel processor thread");
+            global_backchannel->running = false;
+            global_backchannel->should_grab_frames.notify_one();
+            int ret = pthread_join(backchannel_thread, NULL);
+            LOG_DEBUG_OR_ERROR(ret, "join backchannel processor thread");
         }
 
         if (global_restart_video)
@@ -243,34 +256,34 @@ int main(int argc, const char *argv[])
                 LOG_DEBUG_OR_ERROR(ret, "join osd thread");
             }
 
-            // stop jpeg
-            if (global_jpeg[0]->imp_encoder)
+            // --- Stop JPEG and Video Threads ---
+            int jpeg_chn = 0;      // Assuming only global_jpeg[0] is used
+
+            // Check if JPEG thread was running (use running flag as indicator)
+            if (global_jpeg[jpeg_chn]->running)
             {
-                global_jpeg[0]->running = false;
-                global_jpeg[0]->should_grab_frames.notify_one();
-                int ret = pthread_join(global_jpeg[0]->thread, NULL);
-                LOG_DEBUG_OR_ERROR(ret, "join jpeg thread");
+                // Join JPEG thread (consumer) first
+                JPEGWorker::deinit(jpeg_chn);
+                int ret = pthread_join(global_jpeg[jpeg_chn]->thread, NULL);
+                LOG_DEBUG_OR_ERROR(ret, "join jpeg thread " << jpeg_chn);
             }
 
-            // stop stream1
-            if (global_video[1]->imp_encoder)
+            // Stop Video Threads - ensuring producer is stopped after consumer (JPEG)
+            for (int chn = 0; chn < NUM_VIDEO_CHANNELS; ++chn)
             {
-                global_video[1]->running = false;
-                global_video[1]->should_grab_frames.notify_one();
-                int ret = pthread_join(global_video[1]->thread, NULL);
-                LOG_DEBUG_OR_ERROR(ret, "join stream1 thread");
-            }
-
-            // stop stream0
-            if (global_video[0]->imp_encoder)
-            {
-                global_video[0]->running = false;
-                global_video[0]->should_grab_frames.notify_one();
-                int ret = pthread_join(global_video[0]->thread, NULL);
-                LOG_DEBUG_OR_ERROR(ret, "join stream0 thread");
+                // Check if the video stream object exists and was running
+                // We check imp_encoder as a proxy for whether the thread was successfully started
+                if (global_video[chn] && global_video[chn]->imp_encoder)
+                {
+                    LOG_DEBUG("Stopping video thread " << chn);
+                    global_video[chn]->running = false;
+                    // Notify the condition variable in case the thread is waiting in idle state
+                    global_video[chn]->should_grab_frames.notify_one();
+                    int ret = pthread_join(global_video[chn]->thread, NULL);
+                    LOG_DEBUG_OR_ERROR(ret, "join video thread " << chn);
+                }
             }
         }
     }
-
     return 0;
 }

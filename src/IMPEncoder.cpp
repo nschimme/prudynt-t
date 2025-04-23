@@ -402,13 +402,12 @@ int IMPEncoder::deinit()
     }
     else
     {
+        ret = IMP_Encoder_UnRegisterChn(encChn);
+        LOG_DEBUG_OR_ERROR_AND_EXIT(ret, "IMP_Encoder_UnRegisterChn(" << encChn << ")");
 
         ret = IMP_Encoder_StopRecvPic(encChn);
         LOG_DEBUG("IMP_Encoder_StopRecvPic(" << encChn << ")");
     }
-
-    ret = IMP_Encoder_UnRegisterChn(encChn);
-    LOG_DEBUG_OR_ERROR_AND_EXIT(ret, "IMP_Encoder_UnRegisterChn(" << encChn << ")");
 
     ret = IMP_Encoder_DestroyChn(encChn);
     LOG_DEBUG_OR_ERROR_AND_EXIT(ret, "IMP_Encoder_DestroyChn(" << encChn << ")");

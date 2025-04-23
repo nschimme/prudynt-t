@@ -1,22 +1,23 @@
 #ifndef JPEG_WORKER_HPP
 #define JPEG_WORKER_HPP
 
-#include "IMPEncoder.hpp"
+#include "globals.hpp"
 
 class JPEGWorker
 {
 public:
-    explicit JPEGWorker(int jpgChnIndex, int impEncChn);
+    explicit JPEGWorker(int jpgChnIndex);
     ~JPEGWorker();
 
     static void *thread_entry(void *arg);
+    static void activateProducer(int jpgChn, int& first_request_delay_us);
+    static void deinit(int jpgChn);
 
 private:
     void run();
-    int save_jpeg_stream(int fd, IMPEncoderStream *stream);
+    int save_jpeg_stream(int fd, const JPEGFrame& frame);
 
     int jpgChn;
-    int impEncChn;
 };
 
 #endif // JPEG_PROCESSOR_HPP

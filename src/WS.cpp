@@ -13,6 +13,7 @@
 #include "globals.hpp"
 #include <filesystem>
 #include <sys/inotify.h>
+#include "JPEGWorker.hpp"
 
 #include <iomanip>
 
@@ -2176,21 +2177,7 @@ int WS::ws_callback(struct lws *wsi, enum lws_callback_reasons reason, void *use
              */
             int first_request_delay = 0;
             u_ctx->snapshot.r++;
-
-            {
-                global_jpeg[0]->request();
-
-                /* if the jpeg channel is inactive we need to start him
-                * this can also cause that required video channel also
-                * must been started
-                */
-                if (!global_jpeg[0]->active)
-                {
-                    first_request_delay = cfg->websocket.first_image_delay * 1000;
-                    global_jpeg[0]->should_grab_frames.notify_all();
-                    global_jpeg[0]->is_activated.acquire();
-                }
-            }
+           JPEGWorker::activateProducer(0, first_request_delay);
 
             auto now = steady_clock::now();
             auto dur = duration_cast<milliseconds>(now - u_ctx->snapshot.last_snapshot_request).count();
@@ -2320,16 +2307,14 @@ int WS::ws_callback(struct lws *wsi, enum lws_callback_reasons reason, void *use
                 u_ctx->flag |= PNT_FLAG_HTTP_SEND_PREVIEW;
 
                 global_jpeg[0]->request();
-
-                if (!global_jpeg[0]->active)
-                {
-                    global_jpeg[0]->should_grab_frames.notify_all();
-                    global_jpeg[0]->is_activated.acquire();
-                    /* we need this delay to grab a valid image when stream resume from sleep
-                     * usleep is a bad choice, but lws_sul_schedule won't work as expected here
-                     * hopfully we find a better solution later
-                     */
-                    usleep(cfg->websocket.first_image_delay * 1000);
+                int first_request_delay = 0;
+                JPEGWorker::activateProducer(0, first_request_delay);
+                /* we need this delay to grab a valid image when stream resume from sleep
+                 * usleep is a bad choice, but lws_sul_schedule won't work as expected here
+                 * hopfully we find a better solution later
+                 */
+                if (first_request_delay > 0) {
+                    usleep(first_request_delay);
                 }
 
                 lws_callback_on_writable(wsi);

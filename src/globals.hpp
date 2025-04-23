@@ -35,6 +35,10 @@ struct H264NALUnit
     */
 };
 
+struct JPEGFrame {
+    std::vector<uint8_t> data;
+};
+
 struct BackchannelFrame
 {
     std::vector<uint8_t> payload;
@@ -53,6 +57,7 @@ struct jpeg_stream
     IMPEncoder *imp_encoder;
     std::condition_variable should_grab_frames;
     std::binary_semaphore is_activated{0};
+    std::shared_ptr<MsgChannel<JPEGFrame>> msgChannel;
 
     steady_clock::time_point last_image;
     steady_clock::time_point last_subscriber;
@@ -69,7 +74,8 @@ struct jpeg_stream
     }
 
     jpeg_stream(int encChn, _stream *stream)
-        : encChn(encChn), stream(stream), running(false), imp_encoder(nullptr) {}
+        : encChn(encChn), stream(stream), running(false), imp_encoder(nullptr),
+          msgChannel(std::make_shared<MsgChannel<JPEGFrame>>(1)) {}
 };
 
 struct audio_stream
