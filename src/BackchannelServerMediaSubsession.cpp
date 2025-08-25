@@ -8,8 +8,27 @@
 #include "globals.hpp"
 
 #include <GroupsockHelper.hh>
+#include <FramedSource.hh>
 
 #define MODULE "BackchannelSubsession"
+
+// A dummy source that never produces data.
+// Used to trick live555 into thinking a sink-only subsession is playable.
+class DummyFramedSource : public FramedSource {
+public:
+    static DummyFramedSource* createNew(UsageEnvironment& env) {
+        return new DummyFramedSource(env);
+    }
+
+private:
+    DummyFramedSource(UsageEnvironment& env) : FramedSource(env) {}
+    ~DummyFramedSource() {}
+
+    virtual void doGetNextFrame() {
+        // Do nothing. We are a dummy source.
+        // The client will eventually tear down the stream.
+    }
+};
 
 BackchannelServerMediaSubsession *BackchannelServerMediaSubsession::createNew(
     UsageEnvironment &env, IMPBackchannelFormat format)
@@ -394,7 +413,8 @@ FramedSource *BackchannelServerMediaSubsession::createNewStreamSource(unsigned /
                                                                       unsigned & /*estBitrate */)
 {
     // This subsession receives, it doesn't provide a source to an RTPSink.
-    return nullptr;
+    // However, we return a dummy source to trick live555 into allowing PLAY on a sendonly stream.
+    return DummyFramedSource::createNew(envir());
 }
 
 RTPSink *BackchannelServerMediaSubsession::createNewRTPSink(Groupsock * /*rtpGroupsock*/,
