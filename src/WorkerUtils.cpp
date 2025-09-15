@@ -1,13 +1,22 @@
 #include "WorkerUtils.hpp"
 
 #include <cstddef>
+#include <time.h>
 
 namespace WorkerUtils {
 
-unsigned long long tDiffInMs(struct timeval *startTime)
+void getMonotonicTimeOfDay(struct timeval *tv) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    tv->tv_sec = ts.tv_sec;
+    tv->tv_usec = ts.tv_nsec / 1000;
+}
+
+
+unsigned long long getMonotonicTimeDiffInMs(struct timeval *startTime)
 {
     struct timeval currentTime;
-    gettimeofday(&currentTime, NULL);
+    getMonotonicTimeOfDay(&currentTime);
 
     long seconds = currentTime.tv_sec - startTime->tv_sec;
     long microseconds = currentTime.tv_usec - startTime->tv_usec;
