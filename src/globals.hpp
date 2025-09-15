@@ -29,10 +29,8 @@ struct AudioFrame
 struct H264NALUnit
 {
 	std::vector<uint8_t> data;
-    /* timestamp fix, can be removed if solved
 	struct timeval time;
 	int64_t imp_ts;
-    */
 };
 
 struct BackchannelFrame
@@ -109,7 +107,6 @@ struct video_stream
     bool running;
     pthread_t thread;
     bool idr;
-    int idr_fix;
     std::atomic<bool> request_idr;
     bool active{false};
     IMPEncoder *imp_encoder;
@@ -123,7 +120,7 @@ struct video_stream
     std::binary_semaphore is_activated{0};
 
     video_stream(int encChn, _stream *stream, const char *name)
-        : encChn(encChn), stream(stream), name(name), running(false), idr(false), idr_fix(0), request_idr{false}, imp_encoder(nullptr), imp_framesource(nullptr),
+        : encChn(encChn), stream(stream), name(name), running(false), idr(false), request_idr{false}, imp_encoder(nullptr), imp_framesource(nullptr),
           msgChannel(std::make_shared<MsgChannel<H264NALUnit>>(MSG_CHANNEL_SIZE)), onDataCallback(nullptr),  run_for_jpeg{false},
           hasDataCallback{false} {}
 };

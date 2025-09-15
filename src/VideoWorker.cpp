@@ -59,12 +59,10 @@ void VideoWorker::run()
                     continue;
                 }
 
-                /* timestamp fix, can be removed if solved
                 int64_t nal_ts = stream.pack[stream.packCount - 1].timestamp;
                 struct timeval encoder_time;
                 encoder_time.tv_sec = nal_ts / 1000000;
                 encoder_time.tv_usec = nal_ts % 1000000;
-                */
 
                 for (uint32_t i = 0; i < stream.packCount; ++i)
                 {
@@ -83,10 +81,8 @@ void VideoWorker::run()
 #endif
                         H264NALUnit nalu;
 
-                        /* timestamp fix, can be removed if solved
                         nalu.imp_ts = stream.pack[i].timestamp;
                         nalu.time = encoder_time;
-                        */
 
                         // We use start+4 because the encoder inserts 4-byte MPEG
                         //'startcodes' at the beginning of each NAL. Live555 complains
@@ -187,11 +183,6 @@ void VideoWorker::run()
                                 ", curPacks:" << encChnStats.curPacks <<
                                 ", work_done:" << encChnStats.work_done);
                     */
-                    if (global_video[encChn]->idr_fix)
-                    {
-                        IMP_Encoder_RequestIDR(encChn);
-                        global_video[encChn]->idr_fix--;
-                    }
                 }
             }
             else
@@ -261,8 +252,6 @@ void *VideoWorker::thread_entry(void *arg)
     // Proactively request an IDR to ensure SPS/PPS are emitted promptly
     IMP_Encoder_RequestIDR(encChn);
     LOG_DEBUG("IMP_Encoder_RequestIDR(" << encChn << ")");
-    // Also schedule a couple more IDR requests in the first seconds, just in case
-    global_video[encChn]->idr_fix = 2;
 
     /* 'active' indicates, the thread is activly polling and grabbing images
      * 'running' describes the runlevel of the thread, if this value is set to false
