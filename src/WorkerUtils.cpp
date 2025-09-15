@@ -18,12 +18,10 @@ unsigned long long getMonotonicTimeDiffInMs(struct timeval *startTime)
     struct timeval currentTime;
     getMonotonicTimeOfDay(&currentTime);
 
-    long seconds = currentTime.tv_sec - startTime->tv_sec;
-    long microseconds = currentTime.tv_usec - startTime->tv_usec;
+    uint64_t start_us = (uint64_t)startTime->tv_sec * 1000000 + startTime->tv_usec;
+    uint64_t current_us = (uint64_t)currentTime.tv_sec * 1000000 + currentTime.tv_usec;
 
-    unsigned long long milliseconds = (seconds * 1000) + (microseconds / 1000);
-
-    return milliseconds;
+    return (current_us - start_us) / 1000;
 }
 
 } // namespace WorkerUtils
