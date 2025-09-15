@@ -33,6 +33,11 @@ void VideoWorker::run()
 
     while (global_video[encChn]->running)
     {
+        if (global_video[encChn]->request_idr) {
+            LOG_DEBUG("IDR requested for channel " << encChn);
+            IMP_Encoder_RequestIDR(encChn);
+            global_video[encChn]->request_idr = false;
+        }
         /* bool helper to check if this is the active jpeg channel and a jpeg is requested while
          * the channel is inactive
          */

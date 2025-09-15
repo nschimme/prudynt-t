@@ -110,6 +110,7 @@ struct video_stream
     pthread_t thread;
     bool idr;
     int idr_fix;
+    std::atomic<bool> request_idr;
     bool active{false};
     IMPEncoder *imp_encoder;
     IMPFramesource *imp_framesource;
@@ -122,7 +123,7 @@ struct video_stream
     std::binary_semaphore is_activated{0};
 
     video_stream(int encChn, _stream *stream, const char *name)
-        : encChn(encChn), stream(stream), name(name), running(false), idr(false), idr_fix(0), imp_encoder(nullptr), imp_framesource(nullptr),
+        : encChn(encChn), stream(stream), name(name), running(false), idr(false), idr_fix(0), request_idr{false}, imp_encoder(nullptr), imp_framesource(nullptr),
           msgChannel(std::make_shared<MsgChannel<H264NALUnit>>(MSG_CHANNEL_SIZE)), onDataCallback(nullptr),  run_for_jpeg{false},
           hasDataCallback{false} {}
 };

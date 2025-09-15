@@ -21,6 +21,7 @@ IMPDeviceSource<FrameType, Stream>::IMPDeviceSource(UsageEnvironment &env, int e
     stream->onDataCallback = [this]()
     { this->on_data_available(); };
     stream->hasDataCallback = true;
+    stream->request_idr = true;
 
     eventTriggerId = envir().taskScheduler().createEventTrigger(deliverFrame0);
     stream->should_grab_frames.notify_one();
