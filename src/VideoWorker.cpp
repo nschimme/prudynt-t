@@ -73,9 +73,9 @@ void VideoWorker::run()
                         uint8_t *start = (uint8_t *) stream.pack[i].virAddr;
                         uint8_t *end = (uint8_t *) stream.pack[i].virAddr + stream.pack[i].length;
 #endif
+
                         H264NALUnit nalu;
                         nalu.time = monotonic_time;
-                        nalu.imp_ts = stream.pack[i].timestamp;
 
                         // We use start+4 because the encoder inserts 4-byte MPEG
                         //'startcodes' at the beginning of each NAL. Live555 complains

@@ -76,7 +76,7 @@ void IMPDeviceSource<FrameType, Stream>::deliverFrame()
             fFrameSize = nal.data.size();
         }
 
-        WorkerUtils::getMonotonicTimeOfDay(&fPresentationTime);
+        fPresentationTime = nal.timestamp;
 
         memcpy(fTo, &nal.data[0], fFrameSize);
 
