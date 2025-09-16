@@ -22,13 +22,8 @@ AudioWorker::~AudioWorker()
 
 void AudioWorker::process_audio_frame(IMPAudioFrame &frame)
 {
-    int64_t audio_ts = frame.timeStamp;
-    struct timeval encoder_time;
-    encoder_time.tv_sec = audio_ts / 1000000;
-    encoder_time.tv_usec = audio_ts % 1000000;
-
     AudioFrame af;
-    af.time = encoder_time;
+    WorkerUtils::getMonotonicTimeOfDay(&af.time);
 
     uint8_t *start = (uint8_t *) frame.virAddr;
     uint8_t *end = start + frame.len;
