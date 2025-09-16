@@ -65,10 +65,11 @@ void VideoWorker::run()
                 if (next_frame_time.tv_sec == 0) { // First frame
                     WorkerUtils::getMonotonicTimeOfDay(&next_frame_time);
                 } else {
-                    uint64_t current_us = (uint64_t)next_frame_time.tv_sec * 1000000 + next_frame_time.tv_usec;
-                    current_us += frame_duration_us;
-                    next_frame_time.tv_sec = current_us / 1000000;
-                    next_frame_time.tv_usec = current_us % 1000000;
+                    next_frame_time.tv_usec += frame_duration_us;
+                    while (next_frame_time.tv_usec >= 1000000) {
+                        next_frame_time.tv_sec++;
+                        next_frame_time.tv_usec -= 1000000;
+                    }
                 }
 
                 for (uint32_t i = 0; i < stream.packCount; ++i)
