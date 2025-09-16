@@ -31,6 +31,13 @@ void VideoWorker::run()
     unsigned long long ms = 0;
     bool run_for_jpeg = false;
 
+    // Simulated clock variables
+    struct timeval next_frame_time = {0, 0};
+    uint64_t frame_duration_us = 0;
+    if (global_video[encChn]->stream->fps > 0) {
+        frame_duration_us = 1000000 / global_video[encChn]->stream->fps;
+    }
+
     while (global_video[encChn]->running)
     {
         /* bool helper to check if this is the active jpeg channel and a jpeg is requested while
@@ -54,9 +61,15 @@ void VideoWorker::run()
                     continue;
                 }
 
-
-                struct timeval monotonic_time;
-                WorkerUtils::getMonotonicTimeOfDay(&monotonic_time);
+                // Update the simulated clock
+                if (next_frame_time.tv_sec == 0) { // First frame
+                    WorkerUtils::getMonotonicTimeOfDay(&next_frame_time);
+                } else {
+                    uint64_t current_us = (uint64_t)next_frame_time.tv_sec * 1000000 + next_frame_time.tv_usec;
+                    current_us += frame_duration_us;
+                    next_frame_time.tv_sec = current_us / 1000000;
+                    next_frame_time.tv_usec = current_us % 1000000;
+                }
 
                 for (uint32_t i = 0; i < stream.packCount; ++i)
                 {
@@ -75,7 +88,7 @@ void VideoWorker::run()
 #endif
 
                         H264NALUnit nalu;
-                        nalu.time = monotonic_time;
+                        nalu.time = next_frame_time;
 
                         // We use start+4 because the encoder inserts 4-byte MPEG
                         //'startcodes' at the beginning of each NAL. Live555 complains
