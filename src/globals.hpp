@@ -7,10 +7,10 @@
 #include "liveMedia.hh"
 
 #include "MsgChannel.hpp"
-#include "IMPAudio.hpp"
-#include "IMPEncoder.hpp"
-#include "IMPFramesource.hpp"
-#include "IMPBackchannel.hpp"
+#include "hal/Audio.hpp"
+#include "hal/Encoder.hpp"
+#include "IMPFramesource.hpp" // This remains for now
+#include "IMPBackchannel.hpp" // This remains for now
 
 #define MSG_CHANNEL_SIZE 20
 #define NUM_AUDIO_CHANNELS 1
@@ -18,13 +18,9 @@
 
 using namespace std::chrono;
 
-extern std::mutex mutex_main; // protects global_restart_rtsp and global_restart_video
+extern std::mutex mutex_main;
 
-struct AudioFrame
-{
-	std::vector<uint8_t> data;
-	struct timeval time;
-};
+// This struct is now defined in hal/Audio.hpp, so it's removed from here.
 
 struct H264NALUnit
 {
@@ -44,18 +40,17 @@ struct jpeg_stream
     int encChn;
     int streamChn;
     _stream *stream;
-    std::atomic<bool> running; // set to false to make jpeg_grabber thread exit
+    std::atomic<bool> running;
     std::atomic<bool> active{false};
     pthread_t thread;
-    IMPEncoder *imp_encoder;
+    Encoder *encoder; // Changed from IMPEncoder
     std::condition_variable should_grab_frames;
     std::binary_semaphore is_activated{0};
 
     steady_clock::time_point last_image;
     steady_clock::time_point last_subscriber;
 
-    void request()
-    {
+    void request() {
         auto now = steady_clock::now();
         std::unique_lock lck(mutex_main);
         last_subscriber = now;
@@ -66,7 +61,7 @@ struct jpeg_stream
     }
 
     jpeg_stream(int encChn, _stream *stream)
-        : encChn(encChn), stream(stream), running(false), imp_encoder(nullptr) {}
+        : encChn(encChn), stream(stream), running(false), encoder(nullptr) {}
 };
 
 struct audio_stream
@@ -77,23 +72,18 @@ struct audio_stream
     bool running;
     bool active{false};
     pthread_t thread;
-    IMPAudio *imp_audio;
+    Audio *audio; // Changed from IMPAudio
     std::shared_ptr<MsgChannel<AudioFrame>> msgChannel;
     std::function<void(void)> onDataCallback;
-    /* Check whether onDataCallback is not null in a data race free manner.
-     * Returns a momentary value that may be stale by the time it is returned.
-     * Use only for optimizations, i.e., to skip work if no data callback
-     * is registered right now.
-     */
     std::atomic<bool> hasDataCallback;
-    std::mutex onDataCallbackLock; // protects onDataCallback from deallocation
+    std::mutex onDataCallbackLock;
     std::condition_variable should_grab_frames;
     std::binary_semaphore is_activated{0};
 
     StreamReplicator *streamReplicator = nullptr;
 
     audio_stream(int devId, int aiChn, int aeChn)
-        : devId(devId), aiChn(aiChn), aeChn(aeChn), running(false), imp_audio(nullptr),
+        : devId(devId), aiChn(aiChn), aeChn(aeChn), running(false), audio(nullptr),
           msgChannel(std::make_shared<MsgChannel<AudioFrame>>(30)),
           onDataCallback{nullptr}, hasDataCallback{false} {}
 };
@@ -108,18 +98,18 @@ struct video_stream
     bool idr;
     int idr_fix;
     bool active{false};
-    IMPEncoder *imp_encoder;
-    IMPFramesource *imp_framesource;
+    Encoder *encoder; // Changed from IMPEncoder
+    IMPFramesource *imp_framesource; // This remains for now
     std::shared_ptr<MsgChannel<H264NALUnit>> msgChannel;
     std::function<void(void)> onDataCallback;
-    bool run_for_jpeg;                 // see comment in audio_stream
-    std::atomic<bool> hasDataCallback; // see comment in audio_stream
-    std::mutex onDataCallbackLock;     // protects onDataCallback from deallocation
+    bool run_for_jpeg;
+    std::atomic<bool> hasDataCallback;
+    std::mutex onDataCallbackLock;
     std::condition_variable should_grab_frames;
     std::binary_semaphore is_activated{0};
 
     video_stream(int encChn, _stream *stream, const char *name)
-        : encChn(encChn), stream(stream), name(name), running(false), idr(false), idr_fix(0), imp_encoder(nullptr), imp_framesource(nullptr),
+        : encChn(encChn), stream(stream), name(name), running(false), idr(false), idr_fix(0), encoder(nullptr), imp_framesource(nullptr),
           msgChannel(std::make_shared<MsgChannel<H264NALUnit>>(MSG_CHANNEL_SIZE)), onDataCallback(nullptr),  run_for_jpeg{false},
           hasDataCallback{false} {}
 };
@@ -127,7 +117,7 @@ struct video_stream
 struct backchannel_stream
 {
     std::shared_ptr<MsgChannel<BackchannelFrame>> inputQueue;
-    IMPBackchannel* imp_backchannel;
+    IMPBackchannel* imp_backchannel; // This remains for now
     bool running;
     pthread_t thread;
     std::mutex mutex;
@@ -140,14 +130,11 @@ struct backchannel_stream
         running(false) {}
 };
 
-
 extern std::condition_variable global_cv_worker_restart;
-
 extern bool global_restart;
 extern bool global_restart_rtsp;
 extern bool global_restart_video;
 extern bool global_restart_audio;
-
 extern bool global_osd_thread_signal;
 extern bool global_main_thread_signal;
 extern bool global_motion_thread_signal;
