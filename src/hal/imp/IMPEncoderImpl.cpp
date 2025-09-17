@@ -125,28 +125,40 @@ EncodedStream IMPEncoderImpl::get_stream() {
     stream_active = true;
 
     struct timeval monotonic_time;
-    gettimeofday(&monotonic_time, NULL); // A stand-in for the original monotonic time logic
+    gettimeofday(&monotonic_time, NULL);
 
     for (uint32_t i = 0; i < imp_stream.packCount; ++i) {
         EncodedFrame frame;
         frame.timestamp = monotonic_time;
+        frame.is_key_frame = false;
 
 #if defined(PLATFORM_T31) || defined(PLATFORM_T40) || defined(PLATFORM_T41) || defined(PLATFORM_C100)
-        uint8_t *start = (uint8_t *) imp_stream.virAddr + imp_stream.pack[i].offset;
-        uint8_t *end = start + imp_stream.pack[i].length;
+        IMPEncoderPack *pack = &imp_stream.pack[i];
+        if (pack->length) {
+            uint8_t *data_ptr = (uint8_t *) imp_stream.virAddr;
+            if (strcmp(stream->format, "JPEG") == 0) {
+                uint32_t remSize = imp_stream.streamSize - pack->offset;
+                if (remSize < pack->length) {
+                    // Wraparound case
+                    frame.data.insert(frame.data.end(), data_ptr + pack->offset, data_ptr + imp_stream.streamSize);
+                    frame.data.insert(frame.data.end(), data_ptr, data_ptr + (pack->length - remSize));
+                } else {
+                    frame.data.insert(frame.data.end(), data_ptr + pack->offset, data_ptr + pack->offset + pack->length);
+                }
+            } else {
+                frame.data.insert(frame.data.end(), data_ptr + pack->offset, data_ptr + pack->offset + pack->length);
+            }
+        }
 #else
         uint8_t *start = (uint8_t *) imp_stream.pack[i].virAddr;
         uint8_t *end = start + imp_stream.pack[i].length;
+        frame.data.insert(frame.data.end(), start, end);
 #endif
 
-        // Skip MPEG start codes for H.264
-        if (strcmp(stream->format, "H264") == 0 && imp_stream.pack[i].length > 4) {
-            start += 4;
+        if (strcmp(stream->format, "H264") == 0 && frame.data.size() > 4) {
+            frame.data.erase(frame.data.begin(), frame.data.begin() + 4);
         }
 
-        frame.data.insert(frame.data.end(), start, end);
-
-        // Determine if it's a key frame
 #if defined(PLATFORM_T31) || defined(PLATFORM_T40) || defined(PLATFORM_T41) || defined(PLATFORM_C100)
         if (imp_stream.pack[i].nalType.h264NalType == 7 || imp_stream.pack[i].nalType.h264NalType == 8 || imp_stream.pack[i].nalType.h264NalType == 5) {
             frame.is_key_frame = true;

@@ -2,7 +2,7 @@
 #define AUDIO_WORKER_HPP
 
 #include "AudioReframer.hpp"
-#include "IMPAudio.hpp"
+#include "hal/Audio.hpp"
 
 #include <memory>
 
@@ -18,8 +18,8 @@ public:
 
 private:
     void run();
-    void process_audio_frame(IMPAudioFrame &frame);
-    void process_frame(IMPAudioFrame &frame);
+    void process_frame(AudioFrame& frame);
+    void process_raw_frame(AudioFrame& frame);
 
     int encChn;
     std::unique_ptr<AudioReframer> reframer;

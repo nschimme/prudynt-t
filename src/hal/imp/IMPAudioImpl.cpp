@@ -19,10 +19,10 @@ bool IMPAudioImpl::init() {
     io_attr = {
         .samplerate = static_cast<IMPAudioSampleRate>(cfg->audio.input_sample_rate),
         .bitwidth = AUDIO_BIT_WIDTH_16,
-        .soundmode = AUDIO_SOUND_MODE_MONO,
+        .soundmode = cfg->audio.force_stereo ? AUDIO_SOUND_MODE_STEREO : AUDIO_SOUND_MODE_MONO,
         .frmNum = 30,
         .numPerFrm = (int)(cfg->audio.input_sample_rate * 0.040f),
-        .chnCnt = 1
+        .chnCnt = cfg->audio.force_stereo ? 2 : 1
     };
 
     ret = IMP_AI_SetPubAttr(devId, &io_attr);
@@ -52,11 +52,15 @@ bool IMPAudioImpl::init() {
 
     // Additional setup for volume, gain, NS, HPF, AGC would go here...
 
-    // For simplicity in this refactoring, we'll assume PCM for now.
-    // A full implementation would handle the encoder setup from the original file.
-    if (strcmp(cfg->audio.input_format, "PCM") != 0) {
-        LOG_INFO("Using PCM audio. Other formats require encoder setup in HAL.");
-    }
+    // Determine and store the audio format
+    if (strcmp(cfg->audio.input_format, "OPUS") == 0) format = AudioFormat::OPUS;
+    else if (strcmp(cfg->audio.input_format, "AAC") == 0) format = AudioFormat::AAC;
+    else if (strcmp(cfg->audio.input_format, "G711A") == 0) format = AudioFormat::G711A;
+    else if (strcmp(cfg->audio.input_format, "G711U") == 0) format = AudioFormat::G711U;
+    else if (strcmp(cfg->audio.input_format, "G726") == 0) format = AudioFormat::G726;
+    else format = AudioFormat::PCM;
+
+    // A full implementation would also handle the encoder setup here.
 
     return true;
 }
@@ -137,4 +141,12 @@ int IMPAudioImpl::get_bitwidth() {
 
 int IMPAudioImpl::get_soundmode() {
     return io_attr.soundmode;
+}
+
+int IMPAudioImpl::get_output_channel_count() {
+    return io_attr.chnCnt;
+}
+
+AudioFormat IMPAudioImpl::get_format() {
+    return format;
 }

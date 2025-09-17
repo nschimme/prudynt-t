@@ -4,6 +4,16 @@
 #include <cstdint>
 #include <sys/time.h>
 
+// A generic enum for audio formats
+enum class AudioFormat {
+    PCM,
+    G711A,
+    G711U,
+    G726,
+    OPUS,
+    AAC
+};
+
 // A generic structure for an audio frame
 struct AudioFrame {
     std::vector<uint8_t> data;
@@ -26,7 +36,9 @@ public:
     virtual bool supports_encoding() = 0;
     virtual AudioFrame encode_frame(AudioFrame& frame) = 0;
 
+    virtual AudioFormat get_format() = 0;
     virtual int get_samplerate() = 0;
     virtual int get_bitwidth() = 0;
     virtual int get_soundmode() = 0;
+    virtual int get_output_channel_count() = 0;
 };

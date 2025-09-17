@@ -34,7 +34,6 @@ void AudioWorker::process_frame(AudioFrame& frame) {
     if (!frame_to_send.data.empty() && global_audio[encChn]->hasDataCallback
         && (global_video[0]->hasDataCallback || global_video[1]->hasDataCallback))
     {
-        // The AudioFrame from the HAL now goes into the message channel
         if (!global_audio[encChn]->msgChannel->write(frame_to_send)) {
             LOG_ERROR("audio channel:" << encChn << " sink clogged!");
         } else {
@@ -45,12 +44,42 @@ void AudioWorker::process_frame(AudioFrame& frame) {
     }
 }
 
+void AudioWorker::process_raw_frame(AudioFrame& frame) {
+    Audio* audio = global_audio[encChn]->audio;
+    if (audio->get_output_channel_count() == 2 && frame.soundmode == 1) { // 1 = MONO
+        size_t sample_size = frame.bitwidth / 8;
+        size_t num_samples = frame.data.size() / sample_size;
+        size_t stereo_size = frame.data.size() * 2;
+
+        AudioFrame stereo_frame = frame;
+        stereo_frame.data.resize(stereo_size);
+
+        for (size_t i = 0; i < num_samples; i++) {
+            uint8_t* mono_sample = frame.data.data() + (i * sample_size);
+            uint8_t* stereo_left = stereo_frame.data.data() + (i * sample_size * 2);
+            uint8_t* stereo_right = stereo_left + sample_size;
+            memcpy(stereo_left, mono_sample, sample_size);
+            memcpy(stereo_right, mono_sample, sample_size);
+        }
+
+        stereo_frame.soundmode = 2; // 2 = STEREO
+        process_frame(stereo_frame);
+    } else {
+        process_frame(frame);
+    }
+}
+
 void AudioWorker::run() {
     LOG_DEBUG("Start audio processing run loop for channel " << encChn);
     Audio* audio = global_audio[encChn]->audio;
 
-    // The reframer logic would also need to be adapted to use the generic AudioFrame,
-    // but we'll simplify for now.
+    if (audio->get_format() == AudioFormat::AAC) {
+        reframer = std::make_unique<AudioReframer>(
+            audio->get_samplerate(),
+            audio->get_samplerate() * 0.040,
+            1024);
+        LOG_DEBUG("AudioReframer created for channel " << encChn);
+    }
 
     while (global_audio[encChn]->running) {
         if (global_audio[encChn]->hasDataCallback && cfg->audio.input_enabled
@@ -59,7 +88,25 @@ void AudioWorker::run() {
             if (audio->poll_frame(cfg->general.imp_polling_timeout) == 0) {
                 AudioFrame frame = audio->get_frame();
                 if (!frame.data.empty()) {
-                    process_frame(frame);
+                    if (reframer) {
+                        reframer->addFrame(frame.data.data(), frame.timestamp.tv_sec * 1000000 + frame.timestamp.tv_usec);
+                        while (reframer->hasMoreFrames()) {
+                            std::vector<uint8_t> frameData(1024 * sizeof(uint16_t) * audio->get_output_channel_count(), 0);
+                            int64_t audio_ts;
+                            reframer->getReframedFrame(frameData.data(), audio_ts);
+
+                            AudioFrame reframed;
+                            reframed.bitwidth = frame.bitwidth;
+                            reframed.soundmode = frame.soundmode;
+                            reframed.timestamp.tv_sec = audio_ts / 1000000;
+                            reframed.timestamp.tv_usec = audio_ts % 1000000;
+                            reframed.data = frameData;
+
+                            process_raw_frame(reframed);
+                        }
+                    } else {
+                        process_raw_frame(frame);
+                    }
                 }
                 audio->release_frame(frame);
             }

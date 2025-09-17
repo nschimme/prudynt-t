@@ -20,15 +20,18 @@ public:
     bool supports_encoding() override;
     AudioFrame encode_frame(AudioFrame& frame) override;
 
+    AudioFormat get_format() override;
     int get_samplerate() override;
     int get_bitwidth() override;
     int get_soundmode() override;
+    int get_output_channel_count() override;
 
 private:
     int devId;
     int inChn;
     int aeChn;
 
+    AudioFormat format;
     IMPAudioIOAttr io_attr;
     IMPAudioFrame imp_frame;
     bool frame_active = false;
