@@ -7,9 +7,18 @@
 CC                      = ${CROSS_COMPILE}gcc
 CXX                     = ${CROSS_COMPILE}g++
 
+# HAL Configuration
+# -----------------
+HAL                    ?= procf
+ifeq ($(HAL),v4l)
+	SENSOR_IMPL_DEF     = -DSENSOR_IMPL=SENSOR_IMPL_V4L
+else
+	SENSOR_IMPL_DEF     = -DSENSOR_IMPL=SENSOR_IMPL_PROCFS
+endif
+
 # Compiler Flags
 # --------------
-CFLAGS                 ?= -Wall -Wextra -Wno-unused-parameter -O2 -DNO_OPENSSL=1
+CFLAGS                 ?= -Wall -Wextra -Wno-unused-parameter -O2 -DNO_OPENSSL=1 $(SENSOR_IMPL_DEF)
 CXXFLAGS               += $(CFLAGS) -std=c++20 -Wall -Wextra -Wno-unused-parameter
 LDFLAGS                += -lrt -lpthread -latomic
 
@@ -164,8 +173,9 @@ BIN_DIR                 = ./bin
 
 # Source and Object Files
 # =======================
-SOURCES                 = $(wildcard $(SRC_DIR)/*.cpp) $(wildcard $(SRC_DIR)/*.c)
+SOURCES                 = $(wildcard $(SRC_DIR)/*.cpp) $(wildcard $(SRC_DIR)/*.c) $(wildcard $(SRC_DIR)/hal/*.cpp)
 OBJECTS                 = $(patsubst $(SRC_DIR)/%.cpp,$(OBJ_DIR)/%.o,$(wildcard $(SRC_DIR)/*.cpp)) \
+                          $(patsubst $(SRC_DIR)/hal/%.cpp,$(OBJ_DIR)/hal/%.o,$(wildcard $(SRC_DIR)/hal/*.cpp)) \
                           $(patsubst $(SRC_DIR)/%.c,$(OBJ_DIR)/%.o,$(wildcard $(SRC_DIR)/*.c))
 
 $(info Building objects: $(OBJECTS))
@@ -205,6 +215,17 @@ $(VERSION_FILE): $(SRC_DIR)/version.tpl.hpp
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.cpp $(VERSION_FILE)
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) \
+		-I$(SRC_DIR) \
+		-I$(LIBIMP_INC_DIR) \
+		-I$(LIBIMP_INC_DIR)/imp \
+		-I$(LIBIMP_INC_DIR)/sysutils \
+		-isystem $(THIRDPARTY_INC_DIR) \
+		-c $< -o $@
+
+$(OBJ_DIR)/hal/%.o: $(SRC_DIR)/hal/%.cpp $(VERSION_FILE)
+	@mkdir -p $(@D)
+	$(CXX) $(CXXFLAGS) \
+		-I$(SRC_DIR) \
 		-I$(LIBIMP_INC_DIR) \
 		-I$(LIBIMP_INC_DIR)/imp \
 		-I$(LIBIMP_INC_DIR)/sysutils \
